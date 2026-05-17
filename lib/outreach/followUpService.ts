@@ -7,7 +7,7 @@ const client = new Anthropic();
 
 const FOLLOW_UP_CONFIG = [
   { status: "outreach_sent" as const, nextStatus: "followed_up_1" as const, days: 4, num: 1, angle: "gap" },
-  { status: "followed_up_1" as const, nextStatus: "followed_up_2" as const, days: 11, num: 2, angle: "competitor" },
+  { status: "followed_up_1" as const, nextStatus: "followed_up_2" as const, days: 7, num: 2, angle: "competitor" },
 ];
 
 async function generateFollowUp(lead: Lead, angle: "gap" | "competitor"): Promise<string> {
@@ -71,7 +71,7 @@ export async function processFollowUps(): Promise<void> {
   }
 
   // Archive leads with no reply after day 11 follow-up + 7 days grace
-  const archiveCutoff = new Date(now.getTime() - 18 * 24 * 60 * 60 * 1000).toISOString();
+  const archiveCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   await db
     .from("leads")
     .update({ status: "archived" })

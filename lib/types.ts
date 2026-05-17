@@ -1,3 +1,10 @@
+export interface ReviewSnippet {
+  author: string;
+  rating: number;
+  text: string;
+  time_desc: string;
+}
+
 export interface SiteService {
   name: string;
   desc: string;
@@ -44,6 +51,9 @@ export interface Lead {
   site_brief: string | null;
   cold_message: string | null;
   site_structure: SiteStructure | null;
+  photo_refs: string[] | null;
+  photo_urls: string[] | null;
+  review_snippets: ReviewSnippet[] | null;
   lovable_url: string | null;
   screenshot_paths: string[] | null;
   video_url: string | null;
@@ -56,7 +66,9 @@ export interface Lead {
 export interface Campaign {
   id: string;
   niche: string;
-  city: string;
+  city: string;       // legacy primary city
+  state: string | null;
+  cities: string[] | null;
   created_at: string;
 }
 

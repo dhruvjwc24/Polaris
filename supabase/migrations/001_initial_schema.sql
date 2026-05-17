@@ -23,7 +23,7 @@ create table campaigns (
 -- Leads
 create table leads (
   id uuid primary key default gen_random_uuid(),
-  campaign_id uuid references campaigns(id) on deqlete set null,
+  campaign_id uuid references campaigns(id) on delete set null,
   business_name text not null,
   website_url text,
   phone text,
