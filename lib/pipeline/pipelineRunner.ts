@@ -30,7 +30,7 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     await enrichLeads(newLeads.map((l) => l.id));
   }
 
-  // 2. Build mockups for top leads (brief_ready, sorted by priority_score)
+  // 3. Build mockups for top leads (brief_ready, sorted by priority_score)
   const mockupQuery = db
     .from("leads")
     .select("id, site_brief, business_name")
@@ -50,7 +50,7 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     }
   }
 
-  // 3. Generate videos for mockup_ready leads
+  // 4. Generate videos for mockup_ready leads
   const videoQuery = db
     .from("leads")
     .select("id, screenshot_paths")
@@ -68,7 +68,7 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     }
   }
 
-  // 4. Send outreach for video_ready leads that have an email
+  // 5. Send outreach for video_ready leads that have an email
   const outreachQuery = db
     .from("leads")
     .select("id")
@@ -85,11 +85,11 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     }
   }
 
-  // 5. Process follow-ups and check replies (global, not per-campaign)
+  // 6. Process follow-ups and check replies (global, not per-campaign)
   await processFollowUps();
   await checkReplies();
 
-  // 6. Send scheduling emails to positive replies
+  // 7. Send scheduling emails to positive replies
   const { data: positiveLeads } = await db
     .from("leads")
     .select("id")

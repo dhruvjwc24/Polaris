@@ -16,14 +16,16 @@ create type call_outcome as enum ('no_show', 'not_interested', 'follow_up', 'clo
 create table campaigns (
   id uuid primary key default gen_random_uuid(),
   niche text not null,
-  city text not null,
+  city text not null,         -- legacy primary city (kept for backwards compat)
+  state text,
+  cities text[],
   created_at timestamptz not null default now()
 );
 
 -- Leads
 create table leads (
   id uuid primary key default gen_random_uuid(),
-  campaign_id uuid references campaigns(id) on deqlete set null,
+  campaign_id uuid references campaigns(id) on delete set null,
   business_name text not null,
   website_url text,
   phone text,
@@ -41,9 +43,17 @@ create table leads (
   gap_analysis text,
   site_brief text,
   cold_message text,
+  site_structure jsonb,
+  photo_refs text[],
+  photo_urls text[],
+  review_snippets jsonb,
   lovable_url text,
   screenshot_paths text[],
   video_url text,
+  facebook_url text,
+  instagram_url text,
+  linkedin_url text,
+  sms_queued boolean not null default false,
   status lead_status not null default 'new',
   priority_score int not null default 5,
   created_at timestamptz not null default now(),

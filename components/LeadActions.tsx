@@ -7,7 +7,7 @@ type Action = "enrich" | "mockup" | "video" | "send";
 
 const ACTIONS: { action: Action; label: string }[] = [
   { action: "enrich", label: "Enrich" },
-  { action: "mockup", label: "Build Mockup" },
+  { action: "mockup", label: "Build / Rebuild Mockup" },
   { action: "video", label: "Generate Video" },
   { action: "send", label: "Send Outreach" },
 ];

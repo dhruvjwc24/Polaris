@@ -3,6 +3,8 @@ import { db } from "@/lib/db/supabase";
 import type { Lead } from "@/lib/types";
 
 const client = new Anthropic();
+const BUCKET = "pictures";
+const PLACES_PHOTO_BASE = "https://maps.googleapis.com/maps/api/place/photo";
 
 interface EnrichmentResult {
   diagnosis: string;
@@ -48,6 +50,53 @@ Businesses:
 ${list}`;
 }
 
+// Fetch a single Google Places photo and upload it to Supabase Storage.
+// Returns the public URL, or null on failure.
+async function uploadPhoto(ref: string, leadId: string, index: number): Promise<string | null> {
+  try {
+    const key = process.env.GOOGLE_PLACES_API_KEY;
+    const url = `${PLACES_PHOTO_BASE}?maxwidth=1200&photoreference=${ref}&key=${key}`;
+    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+
+    const buffer = await res.arrayBuffer();
+    const contentType = res.headers.get("content-type") ?? "image/jpeg";
+    const ext = contentType.includes("png") ? "png" : "jpg";
+    const path = `leads/${leadId}/${index}.${ext}`;
+
+    const { error } = await db.storage
+      .from(BUCKET)
+      .upload(path, buffer, { contentType, upsert: true });
+
+    if (error) {
+      console.error(`[photos] upload failed for lead ${leadId} photo ${index}: ${error.message}`);
+      return null;
+    }
+
+    const { data } = db.storage.from(BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err) {
+    console.error(`[photos] fetch failed for lead ${leadId} photo ${index}:`, err);
+    return null;
+  }
+}
+
+// Upload all photo_refs for a lead to Supabase Storage and save the URLs.
+async function storeLeadPhotos(lead: Lead): Promise<void> {
+  if (!lead.photo_refs?.length) return;
+
+  const urls: string[] = [];
+  for (let i = 0; i < lead.photo_refs.length; i++) {
+    const url = await uploadPhoto(lead.photo_refs[i], lead.id, i);
+    if (url) urls.push(url);
+  }
+
+  if (!urls.length) return;
+
+  await db.from("leads").update({ photo_urls: urls }).eq("id", lead.id);
+  console.log(`[photos] stored ${urls.length} photos for "${lead.business_name}"`);
+}
+
 export async function enrichLeads(leadIds: string[], force = false): Promise<void> {
   const query = db.from("leads").select("*").in("id", leadIds);
   if (!force) query.in("status", ["new"]);
@@ -57,7 +106,7 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<voi
 
   // Process in batches of 10
   for (let i = 0; i < leads.length; i += 10) {
-    const batch = leads.slice(i, i + 10);
+    const batch = leads.slice(i, i + 10) as Lead[];
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -90,6 +139,9 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<voi
           status: "brief_ready",
         })
         .eq("id", batch[j].id);
+
+      // Store photos to Supabase Storage after enrichment text is saved
+      await storeLeadPhotos(batch[j]);
     }
   }
 }
