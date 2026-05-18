@@ -86,7 +86,8 @@ async function storeLeadPhotos(lead: Lead): Promise<void> {
   if (!lead.photo_refs?.length) return;
 
   const urls: string[] = [];
-  for (let i = 0; i < lead.photo_refs.length; i++) {
+  const maxPhotos = Math.min(lead.photo_refs.length, 10);
+  for (let i = 0; i < maxPhotos; i++) {
     const url = await uploadPhoto(lead.photo_refs[i], lead.id, i);
     if (url) urls.push(url);
   }

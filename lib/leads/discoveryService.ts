@@ -179,7 +179,7 @@ export async function discoverLeads(
         google_maps_id: detail.place_id,
         review_count: detail.user_ratings_total ?? null,
         rating: detail.rating ?? null,
-        photo_refs: detail.photos?.slice(0, 5).map((p) => p.photo_reference) ?? null,
+        photo_refs: detail.photos?.slice(0, 10).map((p) => p.photo_reference) ?? null,
         review_snippets: detail.reviews
           ?.filter((r) => r.rating >= 4 && r.text.trim().length > 20)
           .slice(0, 5)
