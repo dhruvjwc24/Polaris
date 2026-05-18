@@ -20,13 +20,10 @@ function buildBody(lead: Lead): string {
   return lines.join("\n");
 }
 
-export async function sendOutreach(leadId: string): Promise<void> {
-  const { data: lead } = await db
-    .from("leads")
-    .select("*")
-    .eq("id", leadId)
-    .eq("status", "video_ready")
-    .maybeSingle();
+export async function sendOutreach(leadId: string, force = false): Promise<void> {
+  const query = db.from("leads").select("*").eq("id", leadId);
+  if (!force) query.eq("status", "video_ready");
+  const { data: lead } = await query.maybeSingle();
 
   if (!lead?.email || !lead.cold_message) return;
 

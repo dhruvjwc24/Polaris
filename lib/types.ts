@@ -60,6 +60,7 @@ export interface Lead {
   facebook_url: string | null;
   instagram_url: string | null;
   linkedin_url: string | null;
+  business_hours: string[] | null;
   sms_queued: boolean;
   status: LeadStatus;
   priority_score: number;

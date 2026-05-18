@@ -27,6 +27,7 @@ interface PlaceResult {
   rating?: number;
   photos?: PlacePhoto[];
   reviews?: PlaceReview[];
+  opening_hours?: { weekday_text?: string[] };
 }
 
 // Convert person-form / plural niches to the service-form that Places API matches best.
@@ -68,7 +69,7 @@ async function fetchPage(
 
 async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
   const fields =
-    "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews";
+    "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews,opening_hours";
   const res = await fetch(
     `${PLACES_API_BASE}/details/json?place_id=${placeId}&fields=${fields}&key=${process.env.GOOGLE_PLACES_API_KEY}`
   );
@@ -189,6 +190,7 @@ export async function discoverLeads(
             text: r.text.trim(),
             time_desc: r.relative_time_description,
           })) ?? null,
+        business_hours: detail.opening_hours?.weekday_text ?? null,
         source: "google_places",
         priority_score: score,
       });

@@ -98,12 +98,46 @@ async function storeLeadPhotos(lead: Lead): Promise<void> {
   console.log(`[photos] stored ${urls.length} photos for "${lead.business_name}"`);
 }
 
-export async function enrichLeads(leadIds: string[], force = false): Promise<void> {
-  const query = db.from("leads").select("*").in("id", leadIds);
-  if (!force) query.in("status", ["new"]);
-  const { data: leads, error } = await query;
+async function findSocialLinks(websiteUrl: string): Promise<{
+  instagram: string | null;
+  facebook: string | null;
+  linkedin: string | null;
+}> {
+  const result = { instagram: null as string | null, facebook: null as string | null, linkedin: null as string | null };
+  try {
+    const res = await fetch(websiteUrl, {
+      signal: AbortSignal.timeout(8000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)" },
+    });
+    if (!res.ok) return result;
+    const html = await res.text();
 
-  if (error || !leads?.length) return;
+    const igMatch = html.match(/https?:\/\/(?:www\.)?instagram\.com\/([a-zA-Z0-9._]{2,30})(?:\/|\?|"|'|\s)/);
+    if (igMatch && !["p", "explore", "reel", "tv", "stories"].includes(igMatch[1])) {
+      result.instagram = `https://www.instagram.com/${igMatch[1]}/`;
+    }
+
+    const fbMatch = html.match(
+      /https?:\/\/(?:www\.)?facebook\.com\/(?!sharer|plugins|dialog|login|pages\/category|photo|video|groups|events|hashtag|watch)([a-zA-Z0-9._-]{3,60})(?:\/|\?|"|'|\s)/
+    );
+    if (fbMatch) result.facebook = `https://www.facebook.com/${fbMatch[1]}/`;
+
+    const liMatch = html.match(/https?:\/\/(?:www\.)?linkedin\.com\/company\/([a-zA-Z0-9_-]{1,60})(?:\/|\?|"|'|\s)/);
+    if (liMatch) result.linkedin = `https://www.linkedin.com/company/${liMatch[1]}/`;
+  } catch {
+    // website may block crawlers or be unreachable
+  }
+  return result;
+}
+
+export async function enrichLeads(leadIds: string[], force = false): Promise<boolean> {
+  let baseQuery = db.from("leads").select("*").in("id", leadIds);
+  if (!force) baseQuery = baseQuery.in("status", ["new"]);
+  const { data: leads, error } = await baseQuery;
+
+  if (error || !leads?.length) return false;
+
+  let anySuccess = false;
 
   // Process in batches of 10
   for (let i = 0; i < leads.length; i += 10) {
@@ -117,10 +151,14 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<voi
 
     const raw = message.content[0].type === "text" ? message.content[0].text : "";
 
+    // Strip markdown fences Claude sometimes wraps around JSON
+    const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
     let results: EnrichmentResult[];
     try {
-      results = JSON.parse(raw);
+      results = JSON.parse(stripped);
     } catch {
+      console.error("[enrich] JSON parse failed. Raw response:", raw.slice(0, 400));
       continue;
     }
 
@@ -143,6 +181,23 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<voi
 
       // Store photos to Supabase Storage after enrichment text is saved
       await storeLeadPhotos(batch[j]);
+
+      // Scrape social media links from the business website
+      if (batch[j].website_url) {
+        const socials = await findSocialLinks(batch[j].website_url!);
+        const socialUpdate: Record<string, string> = {};
+        if (socials.instagram) socialUpdate.instagram_url = socials.instagram;
+        if (socials.facebook)  socialUpdate.facebook_url  = socials.facebook;
+        if (socials.linkedin)  socialUpdate.linkedin_url  = socials.linkedin;
+        if (Object.keys(socialUpdate).length > 0) {
+          await db.from("leads").update(socialUpdate).eq("id", batch[j].id);
+          console.log(`[socials] found ${Object.keys(socialUpdate).join(", ")} for "${batch[j].business_name}"`);
+        }
+      }
+
+      anySuccess = true;
     }
   }
+
+  return anySuccess;
 }
