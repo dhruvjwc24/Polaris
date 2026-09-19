@@ -62,6 +62,7 @@ export interface Lead {
   linkedin_url: string | null;
   business_hours: string[] | null;
   sms_queued: boolean;
+  manual_outreach_only: boolean;
   status: LeadStatus;
   priority_score: number;
   created_at: string;

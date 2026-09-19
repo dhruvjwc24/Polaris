@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/supabase";
-import { higgsFieldProvider } from "@/lib/video/higgsFieldAutomation";
+import { screenRecordingProvider } from "@/lib/video/screenRecording";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -15,6 +15,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "No screenshots available" }, { status: 400 });
   }
 
-  const result = await higgsFieldProvider.generate(id, lead.screenshot_paths);
+  const result = await screenRecordingProvider.generate(id, lead.screenshot_paths);
   return NextResponse.json(result);
 }

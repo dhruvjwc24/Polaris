@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db/supabase";
 import { getGmailClient } from "./gmailClient";
+import { notifyMainEmail, notifyDiscord } from "@/lib/notify";
 
 const client = new Anthropic();
 
@@ -52,7 +53,17 @@ export async function checkReplies(): Promise<void> {
       continue;
     }
 
-    const thread = await gmail.users.threads.get({ userId: "me", id: threadId });
+    let thread;
+    try {
+      thread = await gmail.users.threads.get({ userId: "me", id: threadId });
+    } catch (err) {
+      // A thread can be unreachable from the currently authenticated account
+      // (e.g. sent under a previously-connected Gmail account before a
+      // switch) or simply deleted. Either way, one bad thread must not stop
+      // every other lead's replies from being checked.
+      console.error(`[replyMonitor] could not fetch thread ${threadId} for lead ${leadId}:`, err);
+      continue;
+    }
     const messages = thread.data.messages ?? [];
 
     // A reply exists if there's more than 1 message in the thread
@@ -71,5 +82,32 @@ export async function checkReplies(): Promise<void> {
       .from("leads")
       .update({ status: intent === "positive" ? "positive" : "replied" })
       .eq("id", leadId);
+
+    // Real engagement — worth Cyril's immediate attention, not just a status change.
+    if (intent === "positive" || intent === "question") {
+      const { data: leadInfo } = await db
+        .from("leads")
+        .select("business_name")
+        .eq("id", leadId)
+        .maybeSingle();
+      const bizName = leadInfo?.business_name ?? "A lead";
+      const label = intent === "positive" ? "responded with interest" : "asked a question";
+      const preview = body.slice(0, 400).trim();
+
+      try {
+        await notifyMainEmail(
+          `${bizName} ${label} — reply in`,
+          `${bizName} ${label} on the outreach email.\n\nReply:\n${preview}`
+        );
+      } catch (err) {
+        console.error(`[replyMonitor] main-email notification failed for lead ${leadId}:`, err);
+      }
+
+      try {
+        await notifyDiscord(`📬 **${bizName}** ${label}!\n> ${preview.replace(/\n/g, "\n> ")}`);
+      } catch (err) {
+        console.error(`[replyMonitor] Discord notification failed for lead ${leadId}:`, err);
+      }
+    }
   }
 }

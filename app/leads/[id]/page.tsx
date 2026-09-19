@@ -6,12 +6,23 @@ import type { Lead, OutreachMessage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+interface EstimateRequest {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  service_needed: string | null;
+  created_at: string;
+}
+
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const [{ data: lead }, { data: messages }] = await Promise.all([
+  const [{ data: lead }, { data: messages }, { data: estimateRequests }] = await Promise.all([
     db.from("leads").select("*").eq("id", id).single(),
     db.from("outreach_messages").select("*").eq("lead_id", id).order("sent_at", { ascending: true }),
+    db.from("estimate_requests").select("*").eq("lead_id", id).order("created_at", { ascending: false }),
   ]);
 
   if (!lead) return <main className="p-6 text-gray-400">Lead not found</main>;
@@ -72,6 +83,24 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <p className="text-gray-300 text-sm">{l.site_brief}</p>
         </Section>
       )}
+
+      {estimateRequests?.length ? (
+        <Section title="Estimate Requests (from the mockup site)" className="mb-6">
+          <div className="flex flex-col gap-3">
+            {(estimateRequests as EstimateRequest[]).map((r) => (
+              <div key={r.id} className="bg-gray-900 rounded p-3 text-sm">
+                <div className="flex items-center gap-2 mb-1 text-gray-500 text-xs">
+                  <span>{new Date(r.created_at).toLocaleString()}</span>
+                </div>
+                <div className="font-medium mb-1">{r.name} — {r.email}</div>
+                <div className="text-gray-400 text-xs">
+                  {[r.phone, r.address, r.service_needed].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {messages?.length ? (
         <Section title="Outreach History">

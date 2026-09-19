@@ -1,16 +1,16 @@
 import Link from "next/link";
 import { db } from "@/lib/db/supabase";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { ColdCallQueue } from "@/components/ColdCallQueue";
 import type { Lead } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const { data: leads } = await db
-    .from("leads")
-    .select("*")
-    .not("status", "eq", "archived")
-    .order("priority_score", { ascending: false });
+  const [{ data: leads }, { data: manualLeads }] = await Promise.all([
+    db.from("leads").select("*").not("status", "eq", "archived").order("priority_score", { ascending: false }),
+    db.from("leads").select("*").eq("source", "manual").order("created_at", { ascending: false }),
+  ]);
 
   return (
     <main className="p-6">
@@ -18,8 +18,14 @@ export default async function Home() {
         <h1 className="text-xl font-bold">Polaris Pipeline</h1>
         <div className="flex gap-3">
           <Link
-            href="/campaigns/new"
+            href="/leads/new"
             className="bg-white text-gray-950 rounded px-4 py-1.5 text-sm font-medium hover:bg-gray-200 transition-colors"
+          >
+            Create Website Request
+          </Link>
+          <Link
+            href="/campaigns/new"
+            className="bg-gray-800 text-gray-100 rounded px-4 py-1.5 text-sm font-medium hover:bg-gray-700 transition-colors"
           >
             New Campaign
           </Link>
@@ -34,6 +40,11 @@ export default async function Home() {
           </Link>
         </div>
       </div>
+
+      {manualLeads?.length ? (
+        <ColdCallQueue leads={manualLeads as Lead[]} />
+      ) : null}
+
       <KanbanBoard leads={(leads ?? []) as Lead[]} />
     </main>
   );

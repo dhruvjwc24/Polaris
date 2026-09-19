@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Action = "enrich" | "mockup" | "video" | "send";
+type Action = "enrich" | "mockup" | "video" | "send" | "close";
 
 const ACTIONS: { action: Action; label: string }[] = [
   { action: "enrich", label: "Enrich" },
   { action: "mockup", label: "Build / Rebuild Mockup" },
   { action: "video", label: "Generate Video" },
   { action: "send", label: "Send Outreach" },
+  { action: "close", label: "Mark as Closed (Customer)" },
 ];
 
 export function LeadActions({ leadId }: { leadId: string }) {
@@ -21,7 +22,13 @@ export function LeadActions({ leadId }: { leadId: string }) {
     setLoading(action);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/leads/${leadId}/${action}`, { method: "POST" });
+      const res = action === "close"
+        ? await fetch(`/api/leads/${leadId}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "closed" }),
+          })
+        : await fetch(`/api/leads/${leadId}/${action}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setFeedback({ action, ok: false, message: data.error ?? `${action} failed` });

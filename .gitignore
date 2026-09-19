@@ -2,5 +2,6 @@
 node_modules/
 .env.local
 playwright/sessions/
+playwright/screenshots/
 *.tsbuildinfo
 .gstack/

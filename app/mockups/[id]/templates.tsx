@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Lead, ReviewSnippet } from "@/lib/types";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -15,20 +16,21 @@ export interface TemplateData {
   heroVideo: string | null;
   galleryPhotos: string[];
   yearsEst: number;
-  usingRealReviews: boolean;
   nicheTitle: string;
+}
+
+// JSON.stringify doesn't escape "</script>", so a business name containing
+// that literal substring (Google Places data, or free-typed via the manual
+// Create form) could break out of this <script> tag and inject arbitrary
+// HTML/JS into a page real prospects view. Escaping "<" closes that off.
+function scriptSafeJson(value: string): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
 export function stars(rating: number) {
   const full = Math.round(rating);
   return "★".repeat(full) + "☆".repeat(5 - full);
 }
-
-export const FALLBACK_REVIEWS: ReviewSnippet[] = [
-  { author: "James M.", rating: 5, text: "Showed up on time, did the job right, left everything spotless. I will absolutely use them again.", time_desc: "a month ago" },
-  { author: "Sarah K.", rating: 5, text: "Called in the morning, they were out by noon. Incredibly professional from start to finish.", time_desc: "2 months ago" },
-  { author: "Robert T.", rating: 5, text: "Best experience I've had with a local contractor. Transparent pricing, excellent work, no mess.", time_desc: "3 months ago" },
-];
 
 // ── PAGE SCRIPT ───────────────────────────────────────────────────────────────
 // accentHex, accentLightHex are colours. bizName/bizCity used in modal copy.
@@ -38,14 +40,19 @@ export const PAGE_SCRIPT = (
   accentLightHex: string,
   bizName: string,
   bizCity: string,
-  niche: string,
+  leadId: string,
 ) => `
 (function(){
   var accent      = '${accentHex}';
   var accentLight = '${accentLightHex}';
-  var BIZ         = ${JSON.stringify(bizName)};
-  var CITY        = ${JSON.stringify(bizCity)};
-  var NICHE       = ${JSON.stringify(niche)};
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  // Escaped consistently since these are user-derived strings that could end up
+  // concatenated into an innerHTML string (BIZ/CITY already are, below).
+  var BIZ         = escapeHtml(${scriptSafeJson(bizName)});
+  var CITY        = escapeHtml(${scriptSafeJson(bizCity)});
+  var LEAD_ID     = ${scriptSafeJson(leadId)};
   var REDUCED     = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ── Prevent FOUC on GSAP-animated hero elements ───────────────────────────
@@ -277,6 +284,42 @@ export const PAGE_SCRIPT = (
     });
   })();
 
+  // ── Custom dropdowns ──────────────────────────────────────────────────────
+  // Real DOM, not a native <select> — a native select's option list is
+  // OS-chrome outside the page's own render tree, so it never reliably shows
+  // up in a recording. This one is just a styled div, so it always does.
+  (function(){
+    document.querySelectorAll('.custom-select').forEach(function(wrap){
+      var trigger = wrap.querySelector('.custom-select-trigger');
+      var valueEl = wrap.querySelector('.custom-select-value');
+      var hidden = wrap.querySelector('input[type="hidden"]');
+      var menu = wrap.querySelector('.custom-select-menu');
+      if (!trigger || !menu) return;
+      trigger.addEventListener('click', function(e){
+        e.stopPropagation();
+        var wasOpen = menu.classList.contains('open');
+        document.querySelectorAll('.custom-select-menu.open').forEach(function(m){ m.classList.remove('open'); });
+        if (!wasOpen) menu.classList.add('open');
+      });
+      menu.querySelectorAll('.custom-select-option').forEach(function(opt){
+        opt.addEventListener('click', function(e){
+          e.stopPropagation();
+          if (hidden) hidden.value = opt.dataset.value;
+          if (valueEl) {
+            valueEl.textContent = opt.textContent;
+            valueEl.classList.remove('placeholder');
+          }
+          menu.querySelectorAll('.custom-select-option').forEach(function(o){ o.classList.remove('active'); });
+          opt.classList.add('active');
+          menu.classList.remove('open');
+        });
+      });
+    });
+    document.addEventListener('click', function(){
+      document.querySelectorAll('.custom-select-menu.open').forEach(function(m){ m.classList.remove('open'); });
+    });
+  })();
+
   // ── Contact / Estimate form ───────────────────────────────────────────────
   (function(){
     var form    = document.getElementById('estimate-form');
@@ -295,8 +338,39 @@ export const PAGE_SCRIPT = (
         return;
       }
       if (errEl) errEl.style.display = 'none';
-      form.style.display = 'none';
-      if (success) { success.style.display = 'block'; success.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+
+      var fd = new FormData(form);
+      var payload = {
+        name: fd.get('name'),
+        email: fd.get('email'),
+        phone: fd.get('phone') || null,
+        zip: fd.get('zip') || null,
+        address: fd.get('address') || null,
+        heardAbout: fd.get('heard') || null,
+        serviceNeeded: fd.get('service') || null,
+        smsInfoConsent: !!fd.get('sms_info'),
+        smsPromoConsent: !!fd.get('sms_promo'),
+      };
+
+      var submitBtn = document.getElementById('estimate-submit');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Sending...'; }
+
+      fetch('/api/leads/' + LEAD_ID + '/estimate-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(function(res){
+        if (!res.ok) throw new Error('request failed');
+        form.style.display = 'none';
+        if (success) { success.style.display = 'block'; success.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      }).catch(function(){
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Request Free Estimate →'; }
+        if (errEl) {
+          errEl.textContent = 'Something went wrong sending your request — please call us directly instead.';
+          errEl.style.display = 'block';
+          errEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
     });
   })();
 
@@ -317,286 +391,16 @@ export const PAGE_SCRIPT = (
     var s=document.createElement('script'); s.src=src; s.onload=cb; document.head.appendChild(s);
   }
 
-  loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js', function(){
-    loadScript('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', function(){
-      loadScript('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js', function(){
-        clearTimeout(_fallback);
-        gsap.registerPlugin(ScrollTrigger);
-        initNicheScene();
-        initGSAP();
-        initCursor();
-      });
+  // Professional sites don't need a 3D animated scene in the hero — the real
+  // business photo/video background (rendered above) carries it instead.
+  loadScript('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js', function(){
+    loadScript('https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js', function(){
+      clearTimeout(_fallback);
+      gsap.registerPlugin(ScrollTrigger);
+      initGSAP();
+      initCursor();
     });
   });
-
-  // ── Niche-specific 3D scene ───────────────────────────────────────────────
-
-  // Roof panel helper: flat XZ box + alternating shingle rows
-  function buildRoofPanel(width, depth, rows, cols, matA, matB) {
-    var grp = new THREE.Group();
-    grp.add(new THREE.Mesh(new THREE.BoxGeometry(width, 0.04, depth), matA));
-    var sw=(width/cols)*0.86, sh=(depth/rows)*0.80;
-    for(var r=0;r<rows;r++){
-      for(var c=0;c<cols;c++){
-        var ox=(c+0.5)*(width/cols)-width/2; if(r%2===1)ox+=(width/cols)*0.5;
-        var oz=(r+0.5)*(depth/rows)-depth/2;
-        var s=new THREE.Mesh(new THREE.BoxGeometry(sw,0.03,sh),(r+c)%3===0?matB:matA);
-        s.position.set(ox,0.035,oz); grp.add(s);
-      }
-    }
-    return grp;
-  }
-
-  // Window helper
-  function addWin(grp, glassMat, frameMat, x, y, z, side) {
-    var fw=side?0.07:0.54, fh=0.54, fd=side?0.54:0.07;
-    var frame=new THREE.Mesh(new THREE.BoxGeometry(fw,fh,fd),frameMat); frame.position.set(x,y,z); grp.add(frame);
-    var gw=side?0.07:0.42, gh=0.21, gd=side?0.42:0.07;
-    var off=side?0.01:0.02;
-    var g1=new THREE.Mesh(new THREE.BoxGeometry(gw,gh,gd),glassMat); g1.position.set(x,y+0.13,z+off); grp.add(g1);
-    var g2=new THREE.Mesh(new THREE.BoxGeometry(gw,gh,gd),glassMat); g2.position.set(x,y-0.13,z+off); grp.add(g2);
-  }
-
-  // House scene (roofing / construction)
-  function buildHouseGroup(aC) {
-    var g=new THREE.Group();
-    var wallM =new THREE.MeshStandardMaterial({color:0xf2e8d4,roughness:0.88});
-    var trimM =new THREE.MeshStandardMaterial({color:0xddd0bc,roughness:0.80});
-    var roofM =new THREE.MeshStandardMaterial({color:aC,roughness:0.92,metalness:0.04});
-    var darkC =aC.clone(); darkC.multiplyScalar(0.70);
-    var roofM2=new THREE.MeshStandardMaterial({color:darkC,roughness:0.96});
-    var winM  =new THREE.MeshStandardMaterial({color:0x8ab8d0,roughness:0.05,metalness:0.80,transparent:true,opacity:0.92});
-    var doorM =new THREE.MeshStandardMaterial({color:0x3e2410,roughness:0.90});
-    var chimM =new THREE.MeshStandardMaterial({color:0x8b7560,roughness:0.90});
-    var gndM  =new THREE.MeshStandardMaterial({color:0x3d6e2a,roughness:0.98});
-
-    // Ground
-    var gnd=new THREE.Mesh(new THREE.PlaneGeometry(14,10),gndM);
-    gnd.rotation.x=-Math.PI/2; gnd.position.y=-1.0; gnd.receiveShadow=true; g.add(gnd);
-    // Path
-    var pm=new THREE.MeshStandardMaterial({color:0xc8baa8,roughness:0.95});
-    var path=new THREE.Mesh(new THREE.BoxGeometry(0.75,0.02,2.2),pm);
-    path.position.set(0,-0.99,2.2); g.add(path);
-
-    // House body
-    var body=new THREE.Mesh(new THREE.BoxGeometry(3.6,2.2,2.8),wallM);
-    body.position.y=0.1; body.castShadow=true; body.receiveShadow=true; g.add(body);
-    // Foundation
-    var fnd=new THREE.Mesh(new THREE.BoxGeometry(3.72,0.22,2.92),trimM);
-    fnd.position.y=-0.88; g.add(fnd);
-
-    // Roof math
-    var rise=1.05, run=2.0, depth=3.05;
-    var ang=Math.atan2(rise,run), hyp=Math.sqrt(rise*rise+run*run);
-
-    // Gable triangles (front + back)
-    [{z:1.41},{z:-1.41}].forEach(function(s){
-      var sh=new THREE.Shape();
-      sh.moveTo(-run,0); sh.lineTo(run,0); sh.lineTo(0,rise); sh.closePath();
-      var gm=new THREE.Mesh(new THREE.ShapeGeometry(sh),wallM);
-      gm.position.set(0,1.2,s.z); if(s.z<0)gm.rotation.y=Math.PI; g.add(gm);
-    });
-
-    // Roof panels (with shingles)
-    var panL=buildRoofPanel(hyp,depth+0.3,9,11,roofM,roofM2);
-    panL.position.set(-run/2,1.2+rise/2,0); panL.rotation.z=ang; g.add(panL);
-    var panR=buildRoofPanel(hyp,depth+0.3,9,11,roofM,roofM2);
-    panR.position.set( run/2,1.2+rise/2,0); panR.rotation.z=-ang; g.add(panR);
-
-    // Ridge
-    var ridge=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.10,depth+0.35),chimM);
-    ridge.position.set(0,1.2+rise+0.03,0); g.add(ridge);
-
-    // Chimney
-    var chim=new THREE.Mesh(new THREE.BoxGeometry(0.38,1.05,0.38),chimM);
-    chim.position.set(0.9,1.2+rise*0.55,0.6); chim.castShadow=true; g.add(chim);
-    var cap=new THREE.Mesh(new THREE.BoxGeometry(0.46,0.07,0.46),chimM);
-    cap.position.set(0.9,1.2+rise+0.1,0.6); g.add(cap);
-
-    // Gutters
-    var gutM=new THREE.MeshStandardMaterial({color:0x909090,roughness:0.7,metalness:0.3});
-    var gL=new THREE.Mesh(new THREE.BoxGeometry(depth+0.35,0.06,0.09),gutM);
-    gL.position.set(-run,1.2,0); gL.rotation.z=ang; g.add(gL);
-    var gR=gL.clone(); gR.position.set(run,1.2,0); gR.rotation.z=-ang; g.add(gR);
-    var ds=new THREE.Mesh(new THREE.BoxGeometry(0.06,2.1,0.06),gutM);
-    ds.position.set(-run-0.03,0.1,1.3); g.add(ds);
-
-    // Windows
-    addWin(g,winM,trimM,-1.0,0.28,1.43,false);
-    addWin(g,winM,trimM, 1.0,0.28,1.43,false);
-    addWin(g,winM,trimM, 1.82,0.28,0.2,true);
-
-    // Attic circle window
-    var aw=new THREE.Mesh(new THREE.CircleGeometry(0.18,8),winM);
-    aw.position.set(0,1.2+rise*0.52,1.42); g.add(aw);
-
-    // Door
-    var dframe=new THREE.Mesh(new THREE.BoxGeometry(0.74,1.18,0.08),trimM);
-    dframe.position.set(0,-0.22,1.45); g.add(dframe);
-    var door=new THREE.Mesh(new THREE.BoxGeometry(0.57,1.02,0.07),doorM);
-    door.position.set(0,-0.25,1.47); door.castShadow=true; g.add(door);
-    var knob=new THREE.Mesh(new THREE.SphereGeometry(0.033,8,8),new THREE.MeshStandardMaterial({color:0xd4a017,metalness:0.9,roughness:0.1}));
-    knob.position.set(0.21,-0.24,1.51); g.add(knob);
-    // Steps
-    [0,1].forEach(function(i){
-      var st=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.1,(i+1)*0.2),trimM);
-      st.position.set(0,-0.85+i*0.1,1.48+(i+1)*0.11); g.add(st);
-    });
-
-    return g;
-  }
-
-  // Landscape scene
-  function buildLandscapeGroup(aC) {
-    var g=new THREE.Group();
-    var gndM=new THREE.MeshStandardMaterial({color:aC,roughness:0.98});
-    var tGeo=new THREE.PlaneGeometry(12,8,22,15);
-    var pos=tGeo.attributes.position;
-    for(var i=0;i<pos.count;i++){
-      var px=pos.getX(i),pz=pos.getZ(i);
-      pos.setY(i,Math.sin(px*0.55)*0.30+Math.cos(pz*0.50)*0.22+Math.sin((px+pz)*0.38)*0.14);
-    }
-    tGeo.computeVertexNormals();
-    var terrain=new THREE.Mesh(tGeo,gndM);
-    terrain.rotation.x=-Math.PI/2; terrain.position.y=-0.8; terrain.receiveShadow=true; g.add(terrain);
-    var trunkM=new THREE.MeshStandardMaterial({color:0x5a3820,roughness:0.9});
-    var leafM=new THREE.MeshStandardMaterial({color:aC.clone().multiplyScalar(0.85),roughness:0.95});
-    [[1.4,0,0.6],[3.0,0,-0.4],[-1.1,0,0.3],[-2.8,0,0.9]].forEach(function(p,i){
-      var h=1.3+i*0.18;
-      var tr=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.11,h,8),trunkM);
-      tr.position.set(p[0],p[1]+h/2-0.8,p[2]); tr.castShadow=true; g.add(tr);
-      [0,1,2].forEach(function(li){
-        var lf=new THREE.Mesh(new THREE.ConeGeometry(0.4+li*0.10,0.68,8),leafM);
-        lf.position.set(p[0],p[1]+h-0.8+0.34+li*0.40,p[2]); lf.castShadow=true; g.add(lf);
-      });
-    });
-    return g;
-  }
-
-  // Generic commercial building (plumbing, HVAC, salon, law, medical, etc.)
-  function buildGenericGroup(aC) {
-    var g=new THREE.Group();
-    var wallM=new THREE.MeshStandardMaterial({color:0xf0e8d8,roughness:0.85});
-    var accM =new THREE.MeshStandardMaterial({color:aC,roughness:0.7,metalness:0.1});
-    var winM =new THREE.MeshStandardMaterial({color:0x8ab8d0,roughness:0.05,metalness:0.7,transparent:true,opacity:0.9});
-    var frmM =new THREE.MeshStandardMaterial({color:0xa0a0a0,roughness:0.5,metalness:0.5});
-    var gndM =new THREE.MeshStandardMaterial({color:0x6b8060,roughness:0.98});
-    var gnd=new THREE.Mesh(new THREE.PlaneGeometry(14,10),gndM);
-    gnd.rotation.x=-Math.PI/2; gnd.position.y=-1.0; gnd.receiveShadow=true; g.add(gnd);
-    var main=new THREE.Mesh(new THREE.BoxGeometry(4.0,2.8,2.5),wallM);
-    main.position.y=0.4; main.castShadow=true; main.receiveShadow=true; g.add(main);
-    var roof=new THREE.Mesh(new THREE.BoxGeometry(4.2,0.18,2.7),accM);
-    roof.position.y=1.9; g.add(roof);
-    var sign=new THREE.Mesh(new THREE.BoxGeometry(4.05,0.52,0.09),accM);
-    sign.position.set(0,1.2,1.27); g.add(sign);
-    [-1.2,0,1.2].forEach(function(x){
-      var fr=new THREE.Mesh(new THREE.BoxGeometry(0.95,1.16,0.07),frmM);
-      fr.position.set(x,0.2,1.26); g.add(fr);
-      var wn=new THREE.Mesh(new THREE.BoxGeometry(0.82,1.04,0.07),winM);
-      wn.position.set(x,0.2,1.28); g.add(wn);
-    });
-    var dM=new THREE.MeshStandardMaterial({color:0x353535,roughness:0.5,metalness:0.5});
-    var dr=new THREE.Mesh(new THREE.BoxGeometry(0.66,1.32,0.07),dM);
-    dr.position.set(0,-0.24,1.285); g.add(dr);
-    return g;
-  }
-
-  function initNicheScene() {
-    var canvas = document.getElementById('webgl-canvas');
-    if (!canvas || typeof THREE === 'undefined') return;
-
-    var W = canvas.offsetWidth || window.innerWidth;
-    var H = canvas.offsetHeight || window.innerHeight;
-    var scene  = new THREE.Scene();
-    var camera = new THREE.PerspectiveCamera(48, W/H, 0.1, 100);
-    camera.position.set(5.5, 3.2, 8.5);
-    camera.lookAt(1.2, 0.4, 0);
-
-    var renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
-    renderer.setSize(W, H);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    renderer.setClearColor(0x000000, 0);
-    renderer.shadowMap.enabled = true;
-
-    var rC=parseInt(accent.slice(1,3),16)/255, gC=parseInt(accent.slice(3,5),16)/255, bC=parseInt(accent.slice(5,7),16)/255;
-    var aC = new THREE.Color(rC,gC,bC);
-
-    // Lighting: warm sun + cool fill + hemisphere
-    scene.add(new THREE.AmbientLight(0xfff0e0, 0.50));
-    var sun=new THREE.DirectionalLight(0xffe8c0, 2.2);
-    sun.position.set(8,14,6); sun.castShadow=true;
-    sun.shadow.mapSize.set(1024,1024);
-    sun.shadow.camera.left=sun.shadow.camera.bottom=-7;
-    sun.shadow.camera.right=sun.shadow.camera.top=7;
-    scene.add(sun);
-    var fill=new THREE.DirectionalLight(0xc8d8f0, 0.7);
-    fill.position.set(-5,3,-3); scene.add(fill);
-    scene.add(new THREE.HemisphereLight(0xffe8c0, 0x3a6b28, 0.38));
-
-    // Pick scene by niche
-    var n=NICHE.toLowerCase(), mainGroup;
-    if(/roof|shingle|gutter|siding|fascia|chimney|construct|remodel|home.improv/.test(n)){
-      mainGroup=buildHouseGroup(aC);
-    } else if(/landscape|lawn|garden|tree|turf|mow|hardscape|irrigat/.test(n)){
-      mainGroup=buildLandscapeGroup(aC);
-    } else {
-      mainGroup=buildGenericGroup(aC);
-    }
-    mainGroup.position.x=1.2; // offset right so text has room
-    scene.add(mainGroup);
-
-    // Atmospheric particles
-    var pN=200, pPos=new Float32Array(pN*3), pVel=[];
-    for(var i=0;i<pN;i++){
-      pPos[i*3]=(Math.random()-0.5)*18; pPos[i*3+1]=(Math.random()-0.5)*12; pPos[i*3+2]=(Math.random()-0.5)*12-3;
-      pVel.push({vx:(Math.random()-0.5)*0.003, vy:0.003+Math.random()*0.005});
-    }
-    var pGeo=new THREE.BufferGeometry(); pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
-    scene.add(new THREE.Points(pGeo,new THREE.PointsMaterial({color:aC,size:0.045,transparent:true,opacity:0.28})));
-
-    // Drag-to-rotate on hero section
-    var drag={on:false,px:0,py:0,vy:0.0018,vx:0};
-    var hero=document.getElementById('hero-section');
-    if(hero){
-      hero.style.cursor='grab';
-      function ds(x,y){drag.on=true;drag.px=x;drag.py=y;drag.vy=0;drag.vx=0;hero.style.cursor='grabbing';}
-      function dm(x,y){
-        if(!drag.on)return;
-        drag.vy=(x-drag.px)*0.009; drag.vx=(y-drag.py)*0.005;
-        mainGroup.rotation.y+=drag.vy;
-        mainGroup.rotation.x=Math.max(-0.45,Math.min(0.45,mainGroup.rotation.x+drag.vx));
-        drag.px=x; drag.py=y;
-      }
-      function de(){drag.on=false;hero.style.cursor='grab';}
-      hero.addEventListener('mousedown',function(e){ds(e.clientX,e.clientY);},{passive:true});
-      hero.addEventListener('mousemove',function(e){dm(e.clientX,e.clientY);},{passive:true});
-      document.addEventListener('mouseup',de);
-      hero.addEventListener('touchstart',function(e){ds(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
-      hero.addEventListener('touchmove',function(e){e.preventDefault();dm(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
-      document.addEventListener('touchend',de);
-    }
-
-    window.addEventListener('resize',function(){
-      W=canvas.offsetWidth||window.innerWidth; H=canvas.offsetHeight||window.innerHeight;
-      camera.aspect=W/H; camera.updateProjectionMatrix(); renderer.setSize(W,H);
-    },{passive:true});
-
-    var t=0;
-    (function loop(){ requestAnimationFrame(loop); t+=0.008;
-      // Auto-rotate + momentum decay
-      if(drag.on){ drag.vy*=0.88; drag.vx*=0.88; }
-      else { drag.vy+=(0.0018-drag.vy)*0.03; drag.vx*=0.90; }
-      mainGroup.rotation.y+=drag.vy;
-      mainGroup.rotation.x=Math.max(-0.40,Math.min(0.40,mainGroup.rotation.x+drag.vx));
-      // Gentle camera bob
-      camera.position.y=3.2+Math.sin(t*0.45)*0.055;
-      // Particles drift upward
-      var arr=pGeo.attributes.position.array;
-      for(var i=0;i<pN;i++){arr[i*3]+=pVel[i].vx;arr[i*3+1]+=pVel[i].vy;if(arr[i*3+1]>6){arr[i*3+1]=-6;arr[i*3]=(Math.random()-0.5)*18;}}
-      pGeo.attributes.position.needsUpdate=true;
-      renderer.render(scene,camera);
-    })();
-  }
 
   // ── GSAP scroll animations ────────────────────────────────────────────────
   function initGSAP() {
@@ -677,7 +481,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
   const {
     lead, id, headline, tagline, cta, about,
     services, reviews, heroPhoto, heroVideo,
-    galleryPhotos, yearsEst, usingRealReviews,
+    galleryPhotos, yearsEst,
   } = d;
 
   function nicheAccent(niche: string) {
@@ -923,6 +727,17 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
         .form-input:focus { border-color:${accent}66; background:rgba(253,246,232,0.07); }
         .form-select  { background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(253,246,232,0.3)' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 13px center; padding-right:36px; cursor:pointer; }
         .form-select option { background:${T.espresso}; color:${T.cream}; }
+
+        /* ── Custom dropdown (not a native <select> — its native popup is
+             OS-chrome, outside the page's own render tree, so it wouldn't
+             show up in a recording; this is real DOM instead) ──────────── */
+        .custom-select { position:relative; }
+        .custom-select-trigger { display:flex; align-items:center; text-align:left; }
+        .custom-select-value.placeholder { color:rgba(253,246,232,0.2); }
+        .custom-select-menu { position:absolute; top:calc(100% + 6px); left:0; right:0; background:${T.espressoMid}; border:1px solid rgba(253,246,232,0.12); border-radius:8px; padding:6px; z-index:50; max-height:220px; overflow-y:auto; opacity:0; pointer-events:none; transform:translateY(-6px); transition:opacity .18s ease, transform .18s ease; box-shadow:0 20px 48px rgba(0,0,0,0.4); }
+        .custom-select-menu.open { opacity:1; pointer-events:all; transform:translateY(0); }
+        .custom-select-option { padding:10px 12px; border-radius:6px; font-size:14px; color:rgba(253,246,232,0.85); cursor:pointer; transition:background .15s; }
+        .custom-select-option:hover, .custom-select-option.active { background:rgba(253,246,232,0.08); }
         .form-check   { display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:12px; color:rgba(253,246,232,0.3); line-height:1.65; }
         .form-check input[type=checkbox] { width:15px; height:15px; accent-color:${accent}; margin-top:2px; flex-shrink:0; cursor:pointer; }
         .form-link    { background:none; border:none; color:${accentLight}; font-size:inherit; cursor:pointer; text-decoration:underline; text-underline-offset:2px; text-decoration-color:${accent}55; padding:0; font-family:inherit; display:inline; }
@@ -1011,19 +826,23 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
         </nav>
 
         {/* ── HERO ─────────────────────────────────────────────────────────── */}
-        <section id="hero-section" style={{ position: "relative", minHeight: "100vh", background: T.espresso, display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
-          {heroVideo ? (
+        <section id="hero-section" data-section="hero" style={{ position: "relative", minHeight: "100vh", background: T.espresso, display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
+          {/* A real photo of this business always wins over the generic stock
+              niche video — a real photo reads as "built for them"; the same
+              stock clip reused across every business in a niche reads as a
+              template, which is exactly what this product is trying not to
+              look like. Stock video is a last-resort fallback only. */}
+          {heroPhoto ? (
+            <img src={heroPhoto} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0, opacity: 0.4 }} />
+          ) : heroVideo ? (
             <video autoPlay loop muted playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0, opacity: 0.5 }}>
               <source src={heroVideo} type="video/mp4" />
             </video>
-          ) : heroPhoto ? (
-            <img src={heroPhoto} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0, opacity: 0.35 }} />
           ) : null}
 
           <div className="warm-grade" style={{ zIndex: 1 }} />
           <div style={{ position: "absolute", inset: 0, zIndex: 2, background: `radial-gradient(ellipse at 65% 30%, ${accent}22 0%, transparent 52%), linear-gradient(to bottom, rgba(30,18,8,0.05) 0%, rgba(30,18,8,0.78) 60%, ${T.espresso} 100%)` }} />
           <div className="grain-overlay" style={{ zIndex: 3 }} />
-          <canvas id="webgl-canvas" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 4, pointerEvents: "none" }} />
 
           <div id="hero-content" style={{ position: "relative", zIndex: 5, padding: "0 clamp(24px,5vw,56px) clamp(56px,8vh,96px)", width: "100%", maxWidth: 860 }}>
             {lead.rating && (
@@ -1043,9 +862,13 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
 
             <h1 style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 800, fontSize: "clamp(44px,8.5vw,108px)", lineHeight: 0.93, letterSpacing: "-0.025em", color: "#ffffff", marginBottom: 18, perspective: "800px" }}>
               {headlineWords.map((word, wi) => (
-                <span key={wi} className="hero-word" style={{ display: "inline-block" }}>
-                  {word}{wi < headlineWords.length - 1 ? " " : ""}
-                </span>
+                // Space as a sibling text node, not inside the inline-block span —
+                // trailing whitespace at the end of an inline-block's content can
+                // get collapsed away by the browser, running words together.
+                <Fragment key={wi}>
+                  <span className="hero-word" style={{ display: "inline-block" }}>{word}</span>
+                  {wi < headlineWords.length - 1 ? " " : ""}
+                </Fragment>
               ))}
             </h1>
 
@@ -1065,7 +888,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                   {lead.phone}
                 </a>
               )}
-              <a href="#services-section" className="btn-ghost" style={{ background: "rgba(253,246,232,0.08)", color: "rgba(253,246,232,0.82)", fontSize: 14, fontWeight: 500, padding: "14px 32px", borderRadius: 8, border: "1.5px solid rgba(253,246,232,0.18)", textDecoration: "none" }}>
+              <a href="#contact-section" className="btn-ghost" style={{ background: "rgba(253,246,232,0.08)", color: "rgba(253,246,232,0.82)", fontSize: 14, fontWeight: 500, padding: "14px 32px", borderRadius: 8, border: "1.5px solid rgba(253,246,232,0.18)", textDecoration: "none" }}>
                 {cta}
               </a>
             </div>
@@ -1094,7 +917,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
         </section>
 
         {/* ── SERVICES ─────────────────────────────────────────────────────── */}
-        <section id="services-section" style={{ background: T.cream, padding: "clamp(56px,7vw,88px) clamp(24px,5vw,56px)" }}>
+        <section id="services-section" data-section="services" style={{ background: T.cream, padding: "clamp(56px,7vw,88px) clamp(24px,5vw,56px)" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
             <div className="gsap-section-head" style={{ marginBottom: 44 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: accent, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 14 }}>What we do</div>
@@ -1116,12 +939,12 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
 
         {/* ── REVIEWS + PHOTOS ─────────────────────────────────────────────── */}
         {(reviews.length > 0 || galleryPhotos.length > 1) && (
-          <section id="reviews-section" style={{ background: T.espresso, padding: "clamp(56px,7vw,96px) clamp(24px,5vw,56px)", overflow: "hidden", position: "relative" }}>
+          <section id="reviews-section" data-section="reviews" style={{ background: T.espresso, padding: "clamp(56px,7vw,96px) clamp(24px,5vw,56px)", overflow: "hidden", position: "relative" }}>
             <div className="ambient-glow" style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse at 50% 60%, ${accent}14 0%, transparent 65%)`, pointerEvents: "none" }} />
 
             <div className="reviews-head" style={{ maxWidth: 1200, margin: "0 auto 56px" }}>
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: `${T.cream}44`, marginBottom: 12 }}>
-                {usingRealReviews ? "Real Google Reviews" : "Customer Reviews"}
+                Real Google Reviews
                 {lead.rating && ` · ${lead.rating} stars`}
               </div>
               <h2 style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 700, fontSize: "clamp(26px,3.5vw,44px)", color: T.cream, letterSpacing: "-0.02em", lineHeight: 1.05 }}>
@@ -1158,6 +981,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                     </div>
                     <button id="rv-next" className="dk-btn" aria-label="Next review">›</button>
                   </div>
+                  <p style={{ fontSize: 11, color: `${T.cream}33`, marginTop: 14 }}>A selection of real Google reviews</p>
                 </div>
               )}
 
@@ -1183,6 +1007,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                     </div>
                     <button id="ph-next" className="dk-btn" aria-label="Next photo">›</button>
                   </div>
+                  <p style={{ fontSize: 11, color: `${T.cream}33`, marginTop: 14 }}>Photos via Google Maps</p>
                 </div>
               )}
             </div>
@@ -1190,7 +1015,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
         )}
 
         {/* ── ABOUT ────────────────────────────────────────────────────────── */}
-        <section id="about-section" style={{ background: T.cream, padding: "clamp(56px,7vw,88px) clamp(24px,5vw,56px)" }}>
+        <section id="about-section" data-section="about" style={{ background: T.cream, padding: "clamp(56px,7vw,88px) clamp(24px,5vw,56px)" }}>
           <div className="about-grid" style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "clamp(40px,6vw,80px)", alignItems: "start" }}>
             <div className="about-left">
               <div style={{ fontSize: 12, fontWeight: 600, color: accent, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 14 }}>About us</div>
@@ -1239,7 +1064,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
         ) : null}
 
         {/* ── CONTACT / ESTIMATE FORM ──────────────────────────────────────── */}
-        <section id="contact-section" style={{ background: T.espresso, padding: "clamp(64px,9vw,104px) clamp(24px,5vw,56px)", position: "relative", overflow: "hidden" }}>
+        <section id="contact-section" data-section="cta" style={{ background: T.espresso, padding: "clamp(64px,9vw,104px) clamp(24px,5vw,56px)", position: "relative", overflow: "hidden" }}>
           <div className="ambient-glow" style={{ position: "absolute", top: 0, left: 0, width: "60%", height: "100%", background: `radial-gradient(ellipse at 15% 50%, ${accent}18 0%, transparent 65%)`, pointerEvents: "none" }} />
           <div className="contact-grid" style={{ maxWidth: 1200, margin: "0 auto", position: "relative" }}>
 
@@ -1300,24 +1125,34 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                 <div className="form-row-2">
                   <div>
                     <label className="form-label">How did you hear about us?</label>
-                    <select name="heard" className="form-input form-select">
-                      <option value="">Select one…</option>
-                      <option value="google-search">Google Search</option>
-                      <option value="google-maps">Google Maps</option>
-                      <option value="referral">Friend / Referral</option>
-                      <option value="social">Social Media</option>
-                      <option value="sign">Flyer / Sign</option>
-                      <option value="other">Other</option>
-                    </select>
+                    <div className="custom-select" data-select="heard">
+                      <button type="button" className="form-input form-select custom-select-trigger">
+                        <span className="custom-select-value placeholder">Select one…</span>
+                      </button>
+                      <input type="hidden" name="heard" defaultValue="" />
+                      <div className="custom-select-menu">
+                        <div className="custom-select-option" data-value="google-search">Google Search</div>
+                        <div className="custom-select-option" data-value="google-maps">Google Maps</div>
+                        <div className="custom-select-option" data-value="referral">Friend / Referral</div>
+                        <div className="custom-select-option" data-value="social">Social Media</div>
+                        <div className="custom-select-option" data-value="sign">Flyer / Sign</div>
+                        <div className="custom-select-option" data-value="other">Other</div>
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label className="form-label">Service needed *</label>
-                    <select name="service" className="form-input form-select" required>
-                      <option value="">Select a service…</option>
-                      {services.map((s) => (
-                        <option key={s.name} value={s.name}>{s.name}</option>
-                      ))}
-                    </select>
+                    <div className="custom-select" data-select="service">
+                      <button type="button" className="form-input form-select custom-select-trigger">
+                        <span className="custom-select-value placeholder">Select a service…</span>
+                      </button>
+                      <input type="hidden" name="service" defaultValue="" required />
+                      <div className="custom-select-menu">
+                        {services.map((s) => (
+                          <div key={s.name} className="custom-select-option" data-value={s.name}>{s.name}</div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1380,7 +1215,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               {/* Social icons — only rendered when URLs are found */}
-              {(lead.instagram_url || lead.facebook_url || lead.linkedin_url) && (
+              {(lead.instagram_url || lead.facebook_url) && (
                 <div style={{ display: "flex", gap: 8 }}>
                   {lead.instagram_url && (
                     <a href={lead.instagram_url} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="Instagram">
@@ -1398,15 +1233,6 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                       </svg>
                     </a>
                   )}
-                  {lead.linkedin_url && (
-                    <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="LinkedIn">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-2-2 2 2 0 00-2 2v7h-4v-7a6 6 0 016-6z"/>
-                        <rect x="2" y="9" width="4" height="12"/>
-                        <circle cx="4" cy="4" r="2"/>
-                      </svg>
-                    </a>
-                  )}
                 </div>
               )}
               <span className="nav-sub-item" data-nav="privacy" style={{ fontSize: 12, color: "rgba(253,246,232,0.15)", fontWeight: 400, cursor: "pointer" }}>Privacy</span>
@@ -1420,7 +1246,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
 
       </div>
 
-      <script dangerouslySetInnerHTML={{ __html: PAGE_SCRIPT(accent, accentLight, lead.business_name, lead.city ?? "", lead.niche) }} />
+      <script dangerouslySetInnerHTML={{ __html: PAGE_SCRIPT(accent, accentLight, lead.business_name, lead.city ?? "", id) }} />
     </>
   );
 }

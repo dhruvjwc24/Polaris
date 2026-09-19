@@ -2,7 +2,7 @@ import { db } from "@/lib/db/supabase";
 import { discoverContacts } from "@/lib/leads/contactDiscoveryService";
 import { enrichLeads } from "@/lib/leads/enrichmentService";
 import { templateProvider } from "@/lib/mockup/templateMockup";
-import { higgsFieldProvider } from "@/lib/video/higgsFieldAutomation";
+import { screenRecordingProvider } from "@/lib/video/screenRecording";
 import { sendOutreach } from "@/lib/outreach/gmailService";
 import { processFollowUps } from "@/lib/outreach/followUpService";
 import { checkReplies } from "@/lib/outreach/replyMonitor";
@@ -61,7 +61,7 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
   for (const lead of videoLeads ?? []) {
     if (!lead.screenshot_paths?.length) continue;
     try {
-      await higgsFieldProvider.generate(lead.id, lead.screenshot_paths);
+      await screenRecordingProvider.generate(lead.id, lead.screenshot_paths);
     } catch (err) {
       console.error(`Video failed for ${lead.id}:`, err);
       await db.from("leads").update({ status: "mockup_ready" }).eq("id", lead.id);
@@ -73,6 +73,7 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     .from("leads")
     .select("id")
     .eq("status", "video_ready")
+    .eq("manual_outreach_only", false)
     .not("email", "is", null);
   if (campaignId) outreachQuery.eq("campaign_id", campaignId);
   const { data: outreachLeads } = await outreachQuery;

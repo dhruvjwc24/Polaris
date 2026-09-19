@@ -1,6 +1,6 @@
 import { db } from "@/lib/db/supabase";
-import type { Lead, SiteStructure } from "@/lib/types";
-import { FALLBACK_REVIEWS, WarmNeighborhoodTemplate, type TemplateData } from "./templates";
+import type { Lead, SiteStructure, ReviewSnippet } from "@/lib/types";
+import { WarmNeighborhoodTemplate, type TemplateData } from "./templates";
 
 export const dynamic = "force-dynamic";
 
@@ -62,15 +62,15 @@ export default async function MockupPage({ params }: { params: Promise<{ id: str
 
   const yearsEst = lead.years_established ?? 10;
 
-  const storedReviews = (lead.review_snippets as typeof FALLBACK_REVIEWS | null)
-    ?.filter((r) => r.rating >= 4 && r.text.trim().length > 20) ?? null;
-  const reviews        = storedReviews?.length ? storedReviews : FALLBACK_REVIEWS;
-  const usingRealReviews = !!(storedReviews?.length);
+  // Real reviews only, straight from the Google Maps extraction — never
+  // fabricated testimonials. If a lead has none, the section just doesn't render.
+  const reviews = (lead.review_snippets as ReviewSnippet[] | null)
+    ?.filter((r) => r.rating >= 4 && r.text.trim().length > 20) ?? [];
 
   const templateData: TemplateData = {
     lead, id, headline, tagline, cta, about, services,
     reviews, heroPhoto, heroVideo: getNicheVideo(lead.niche),
-    galleryPhotos, yearsEst, usingRealReviews, nicheTitle,
+    galleryPhotos, yearsEst, nicheTitle,
   };
 
   return <WarmNeighborhoodTemplate {...templateData} />;
