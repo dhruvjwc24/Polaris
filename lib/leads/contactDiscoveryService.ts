@@ -4,21 +4,18 @@
  * For each lead that comes in from Google Maps with only a name + phone,
  * this service searches for a way to reach them in priority order:
  *
- *   1. Email  — scraped from their website, then Brave web search
- *   2. Social — Facebook page, Instagram profile (scrape + Brave search + FB API)
- *   3. Phone  — already guaranteed from Google Maps; queued for SMS (stub)
+ *   1. Email  — scraped from their website, then Brave/Tavily web search
+ *   2. Social — Facebook page, Instagram profile (scrape + web search + FB API)
+ *   3. Last resort — if the lead still has neither email nor phone after all
+ *      of the above (rare — Google Places almost always returns a phone), a
+ *      broader combined web search for either, before giving up and flagging
+ *      it for Cyril to review manually.
  *
  * Run this BEFORE enrichment so the pipeline can send outreach automatically.
  *
  * Required env vars:
  *   BRAVE_SEARCH_API_KEY   — free at https://api.search.brave.com (2,000 queries/month free)
  *   META_APP_ACCESS_TOKEN  — App-level token from developers.facebook.com (no user auth needed)
- *
- * SMS env vars (message template to be configured separately):
- *   SMS_MESSAGE_TEMPLATE   — message body template, e.g. "Hey {name}, I built you a site mockup..."
- *   TWILIO_ACCOUNT_SID     — from twilio.com/console
- *   TWILIO_AUTH_TOKEN      — from twilio.com/console
- *   TWILIO_FROM_NUMBER     — your Twilio phone number e.g. +15005550006
  */
 
 import { db } from "@/lib/db/supabase";
@@ -33,6 +30,7 @@ const GRAPH_API = "https://graph.facebook.com/v21.0";
 // ── Regex patterns ────────────────────────────────────────────────────────────
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const PHONE_RE = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
 const FACEBOOK_RE =
   /https?:\/\/(www\.)?facebook\.com\/(?!sharer|share|login|dialog|photo|watch|hashtag|groups\/)[a-zA-Z0-9._/\-]+/g;
 const INSTAGRAM_RE = /https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._]+\/?/g;
@@ -53,6 +51,7 @@ function isRealEmail(email: string): boolean {
 
 interface ScrapedContacts {
   emails: string[];
+  phones: string[];
   facebook: string | null;
   instagram: string | null;
   linkedin: string | null;
@@ -64,23 +63,25 @@ async function scrapeWebsite(url: string): Promise<ScrapedContacts> {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)" },
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return { emails: [], facebook: null, instagram: null, linkedin: null };
+    if (!res.ok) return { emails: [], phones: [], facebook: null, instagram: null, linkedin: null };
 
     const html = await res.text();
 
     const emails = [...new Set(html.match(EMAIL_RE) ?? [])].filter(isRealEmail);
+    const phones = [...new Set(html.match(PHONE_RE) ?? [])];
     const fbMatches = html.match(FACEBOOK_RE) ?? [];
     const igMatches = html.match(INSTAGRAM_RE) ?? [];
     const liMatches = html.match(LINKEDIN_RE) ?? [];
 
     return {
       emails,
+      phones,
       facebook: fbMatches[0] ?? null,
       instagram: igMatches[0] ?? null,
       linkedin: liMatches[0] ?? null,
     };
   } catch {
-    return { emails: [], facebook: null, instagram: null, linkedin: null };
+    return { emails: [], phones: [], facebook: null, instagram: null, linkedin: null };
   }
 }
 
@@ -163,6 +164,25 @@ async function findSocialViaSearch(
   };
 }
 
+// Last resort when a lead still has neither email nor phone after every other
+// step — rare, since Google Places almost always returns a phone. One
+// broader search covering both, instead of the narrower email-only query
+// above. Callable again later (e.g. a "search again" action on a flagged
+// lead) since it's just a normal function, not a one-shot pipeline step.
+async function findContactViaBroadSearch(
+  businessName: string,
+  city: string
+): Promise<{ email: string | null; phone: string | null }> {
+  const links = await webSearch(`"${businessName}" "${city}" phone number email contact`);
+  for (const link of links.slice(0, 3)) {
+    const { emails, phones } = await scrapeWebsite(link);
+    if (emails.length || phones.length) {
+      return { email: emails[0] ?? null, phone: phones[0] ?? null };
+    }
+  }
+  return { email: null, phone: null };
+}
+
 // ── Facebook Pages API ────────────────────────────────────────────────────────
 
 async function searchFacebookPages(businessName: string): Promise<string | null> {
@@ -184,29 +204,13 @@ async function searchFacebookPages(businessName: string): Promise<string | null>
   }
 }
 
-// ── SMS stub ──────────────────────────────────────────────────────────────────
-// Message template will be provided separately via SMS_MESSAGE_TEMPLATE env var.
-// Sending will use Twilio once TWILIO_* credentials are configured.
-
-async function queueSmsOutreach(leadId: string, phone: string): Promise<void> {
-  // Mark lead so the pipeline knows SMS is the outreach path
-  await db.from("leads").update({ sms_queued: true }).eq("id", leadId);
-  console.log(`[SMS QUEUED] Lead ${leadId} → ${phone}`);
-
-  // TODO: Uncomment and configure once SMS_MESSAGE_TEMPLATE is provided
-  // const template = process.env.SMS_MESSAGE_TEMPLATE ?? "";
-  // const { data: lead } = await db.from("leads").select("business_name").eq("id", leadId).single();
-  // const body = template.replace("{name}", lead?.business_name ?? "there");
-  // await sendViaTwilio(phone, body);
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function discoverContacts(leadIds: string[]): Promise<void> {
   const { data: leads, error } = await db
     .from("leads")
     .select(
-      "id, business_name, city, website_url, email, phone, facebook_url, instagram_url"
+      "id, business_name, city, website_url, email, phone, facebook_url, instagram_url, needs_contact_review"
     )
     .in("id", leadIds);
 
@@ -253,18 +257,30 @@ export async function discoverContacts(leadIds: string[]): Promise<void> {
       }
     }
 
-    // ── Priority 3: Phone → SMS queue (last resort) ───────────────────────
-    // Phone is almost always present from Google Maps.
-    // Queue SMS only if we found no email and no social media at all.
+    // ── Last resort: still no email AND no phone at all ───────────────────
+    // Google Places almost always returns a phone, so reaching this point is
+    // rare. One broader combined search before giving up; if it still finds
+    // nothing, flag for Cyril to review/delete manually instead of silently
+    // dropping the lead.
 
-    const hasEmail = lead.email || update.email;
-    const hasSocial = update.facebook_url || update.instagram_url ||
-                      lead.facebook_url || lead.instagram_url;
+    const stillHasEmail = Boolean(lead.email || update.email);
+    const stillHasPhone = Boolean(lead.phone);
 
-    if (!hasEmail && !hasSocial && lead.phone) {
-      await queueSmsOutreach(lead.id, lead.phone);
-      // sms_queued is written inside queueSmsOutreach — skip adding to update
+    if (!stillHasEmail && !stillHasPhone) {
+      const found = await findContactViaBroadSearch(lead.business_name, lead.city);
+      if (found.email) update.email = found.email;
+      if (found.phone) update.phone = found.phone;
     }
+
+    // Resolve the flag off final state, not just the broad-search branch above —
+    // an earlier tier (e.g. the plain email search) can also be what clears a
+    // stale true flag on a re-check, and that must count too. Only write it
+    // when it actually changes, so a lead with nothing new doesn't get an
+    // update call just for this.
+    const nowHasEmail = Boolean(lead.email || update.email);
+    const nowHasPhone = Boolean(lead.phone || update.phone);
+    const shouldReview = !nowHasEmail && !nowHasPhone;
+    if (shouldReview !== lead.needs_contact_review) update.needs_contact_review = shouldReview;
 
     if (Object.keys(update).length) {
       await db.from("leads").update(update).eq("id", lead.id);

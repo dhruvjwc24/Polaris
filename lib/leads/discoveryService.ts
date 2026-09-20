@@ -1,8 +1,13 @@
 import { db } from "@/lib/db/supabase";
 import { scoreLead } from "./scoring";
+import { classifyWebsiteAge } from "./websiteAge";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 const MAX_LEADS = 15;
+// Anything scoring below this on the combined signals — website status,
+// reviews, rating, tenure, search prominence — isn't a strong enough
+// prospect to spend a mockup + outreach cycle on.
+const MIN_PRIORITY_SCORE = 7;
 
 interface PlacePhoto {
   photo_reference: string;
@@ -161,13 +166,18 @@ export async function discoverLeads(
         .maybeSingle();
       if (existing) continue;
 
+      const websiteAgeStatus = websiteUrl ? await classifyWebsiteAge(websiteUrl) : null;
+
       const score = scoreLead({
         website_url: websiteUrl,
+        website_age_status: websiteAgeStatus,
         review_count: detail.user_ratings_total ?? null,
         rating: detail.rating ?? null,
         years_established: null,
         position: i,
       });
+
+      if (score < MIN_PRIORITY_SCORE) continue;
 
       const { error: insertError } = await db.from("leads").insert({
         campaign_id: campaignId,
@@ -180,6 +190,7 @@ export async function discoverLeads(
         google_maps_id: detail.place_id,
         review_count: detail.user_ratings_total ?? null,
         rating: detail.rating ?? null,
+        website_age_status: websiteAgeStatus,
         photo_refs: detail.photos?.slice(0, 10).map((p) => p.photo_reference) ?? null,
         review_snippets: detail.reviews
           ?.filter((r) => r.rating >= 4 && r.text.trim().length > 20)

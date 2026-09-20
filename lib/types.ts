@@ -35,6 +35,7 @@ export interface Lead {
   campaign_id: string | null;
   business_name: string;
   website_url: string | null;
+  website_age_status: "outdated" | "modern" | "unknown" | null;
   phone: string | null;
   email: string | null;
   location: string | null;
@@ -62,6 +63,7 @@ export interface Lead {
   linkedin_url: string | null;
   business_hours: string[] | null;
   sms_queued: boolean;
+  needs_contact_review: boolean;
   manual_outreach_only: boolean;
   status: LeadStatus;
   priority_score: number;

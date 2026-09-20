@@ -1,8 +1,9 @@
 import { db } from "@/lib/db/supabase";
+import { flagUnreachableLeads } from "@/lib/leads/reachability";
 import { discoverContacts } from "@/lib/leads/contactDiscoveryService";
 import { enrichLeads } from "@/lib/leads/enrichmentService";
 import { templateProvider } from "@/lib/mockup/templateMockup";
-import { screenRecordingProvider } from "@/lib/video/screenRecording";
+import { enqueueVideoJob } from "@/lib/video/queue";
 import { sendOutreach } from "@/lib/outreach/gmailService";
 import { processFollowUps } from "@/lib/outreach/followUpService";
 import { checkReplies } from "@/lib/outreach/replyMonitor";
@@ -11,7 +12,11 @@ import { sendSchedulingEmail } from "@/lib/outreach/schedulingService";
 const MOCKUP_BATCH_SIZE = 8;
 
 export async function runPipeline(campaignId?: string, baseUrl?: string): Promise<void> {
-  // 1. Contact discovery — find email, social media, and queue SMS for new leads
+  // 0. Flag leads with no email and no phone for manual review — backstop for
+  //    leads that skipped contactDiscoveryService entirely (e.g. CSV imports).
+  await flagUnreachableLeads();
+
+  // 1. Contact discovery — find email and social media for new leads.
   //    Runs before enrichment so outreach channels are known before Claude processes leads.
   const discoveryQuery = db.from("leads").select("id").eq("status", "new");
   if (campaignId) discoveryQuery.eq("campaign_id", campaignId);
@@ -50,10 +55,13 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     }
   }
 
-  // 4. Generate videos for mockup_ready leads
+  // 4. Queue videos for mockup_ready leads — actual generation happens in the
+  //    background worker (lib/video/queueWorker.ts), one at a time, shared
+  //    with manually-triggered "Generate Video" clicks so the two paths never
+  //    run Playwright concurrently against each other.
   const videoQuery = db
     .from("leads")
-    .select("id, screenshot_paths")
+    .select("id, business_name, screenshot_paths")
     .eq("status", "mockup_ready");
   if (campaignId) videoQuery.eq("campaign_id", campaignId);
   const { data: videoLeads } = await videoQuery;
@@ -61,10 +69,9 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
   for (const lead of videoLeads ?? []) {
     if (!lead.screenshot_paths?.length) continue;
     try {
-      await screenRecordingProvider.generate(lead.id, lead.screenshot_paths);
+      await enqueueVideoJob(lead.id, lead.business_name, lead.screenshot_paths);
     } catch (err) {
-      console.error(`Video failed for ${lead.id}:`, err);
-      await db.from("leads").update({ status: "mockup_ready" }).eq("id", lead.id);
+      console.error(`Queueing video failed for ${lead.id}:`, err);
     }
   }
 

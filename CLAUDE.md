@@ -318,6 +318,52 @@ The mockup is the icebreaker. The Zoom call closes.
 
 ---
 
+## Contact Data Requirement
+
+Every lead must carry a phone number if it has no email — a lead with neither is archived
+automatically (`lib/leads/reachability.ts`, run on every pipeline tick), so any lead still
+active in the pipeline is guaranteed to have at least one. Google Places nearly always returns
+a phone, so this holds naturally today; if a future contact-discovery path can produce a lead
+with no email and no phone captured, fix that at the source rather than relying only on the
+archive-after-the-fact backstop.
+
+## Video Queue
+
+Every "Generate Video" click (and the campaign auto-pipeline's video step) writes to a
+`video_generation_queue` table instead of generating inline. A background worker started
+from `instrumentation.ts` (`lib/video/queueWorker.ts`) drains it one job at a time, whenever
+the Next.js server process is actually running — that's the only real "online" signal
+available, since a Claude Code session has no way to broadcast its own liveness to the app.
+The UI (`components/VideoQueuePanel.tsx`, `LeadActions.tsx`) shows worker status, per-job ETA,
+and a "Claude is currently offline" toast (auto-dismisses after 6s) when a video is queued
+while the worker is offline — the job still queues regardless, it's purely informational.
+
+**When a session opens Polaris:** before doing anything else, run `npm run queue:status`. If
+it prints a number greater than 0, ask: "There are N videos queued to have their walkthrough
+video generated — should I start with this first?" before proceeding. If it prints 0, skip
+this prompt entirely and continue normally. Starting the dev server (`npm run dev`) brings the
+worker online and it will drain the queue on its own — no manual per-video action needed once
+the server is up.
+
+## Outreach Rate Limiting — Required Before Going Live
+
+`lib/pipeline/pipelineRunner.ts`'s outreach-send step currently has **no rate limit** — it
+sends to every eligible lead (`status='video_ready'`, has email, `manual_outreach_only=false`)
+in the same tick, and the scheduler ticks every 15 minutes. Cyril considers getting the sending
+account (`polarisoutreach.co@gmail.com`) flagged as spam or banned by Gmail **the single
+biggest risk in this project** — it would make outreach invisible to every prospect, silently
+or permanently. As of 2026-09-20 every lead has `manual_outreach_only=true` as a blanket safety
+pause, so this isn't an active risk today, but it must not stay unrated-limited once that pause
+lifts.
+
+**Before real bulk outreach ever goes live:** build an actual send-rate limiter — his plan is
+to ramp gradually (~5 emails/day to start, ~20/day after about a week, continuing to scale from
+there) rather than sending everything eligible at once. He also plans to build the account's
+general legitimacy himself (using it for ordinary signups/personal email, not just cold
+outreach) — that part is on him, not something to automate. See the
+`project-polaris-email-deliverability-warmup` memory for full detail. Treat this as a hard
+prerequisite for lifting the outreach pause at scale, not an optional polish step.
+
 ## Success Metrics
 
 - **Reply rate:** 10-15% baseline

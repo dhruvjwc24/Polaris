@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Action = "enrich" | "mockup" | "video" | "send" | "close";
@@ -17,6 +17,13 @@ export function LeadActions({ leadId }: { leadId: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState<Action | null>(null);
   const [feedback, setFeedback] = useState<{ action: Action; ok: boolean; message: string } | null>(null);
+  const [offlineNotice, setOfflineNotice] = useState(false);
+
+  useEffect(() => {
+    if (!offlineNotice) return;
+    const id = setTimeout(() => setOfflineNotice(false), 6000);
+    return () => clearTimeout(id);
+  }, [offlineNotice]);
 
   async function run(action: Action) {
     setLoading(action);
@@ -32,6 +39,14 @@ export function LeadActions({ leadId }: { leadId: string }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setFeedback({ action, ok: false, message: data.error ?? `${action} failed` });
+      } else if (action === "video" && data.queued) {
+        if (!data.workerOnline) setOfflineNotice(true);
+        setFeedback({
+          action,
+          ok: true,
+          message: `Queued — position ${data.position}, ~${Math.round(data.etaSeconds)}s`,
+        });
+        router.refresh();
       } else {
         setFeedback({ action, ok: true, message: `${action} complete` });
         router.refresh();
@@ -66,6 +81,11 @@ export function LeadActions({ leadId }: { leadId: string }) {
       {feedback && (
         <p className={`text-sm ${feedback.ok ? "text-green-400" : "text-red-400"}`}>
           {feedback.message}
+        </p>
+      )}
+      {offlineNotice && (
+        <p className="text-sm text-yellow-400 mt-2">
+          Claude is currently offline, please wait for it to be turned on and then try again.
         </p>
       )}
     </div>

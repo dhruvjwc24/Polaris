@@ -1,5 +1,8 @@
+import type { WebsiteAgeStatus } from "./websiteAge";
+
 interface ScoringInput {
   website_url: string | null;
+  website_age_status?: WebsiteAgeStatus | null;
   review_count: number | null;
   rating: number | null;
   years_established: number | null;
@@ -11,9 +14,16 @@ interface ScoringInput {
 export function scoreLead(input: ScoringInput): number {
   let score = 5;
 
-  // Website presence
-  if (!input.website_url) score += 3;
-  else score -= 2; // has existing site = less urgent
+  // Website presence/age — three buckets, ranked by how easy the sale is:
+  // a confirmed-outdated site beats no site at all, because that business
+  // has already cleared the real hurdle (paying for a website once) — the
+  // pitch is "upgrade," not "should you even do this." No website is a real
+  // but mixed pool (never got around to it, or already said no once — we
+  // can't tell which from this data). A modern or unclassified-age site is
+  // neither: not worth prioritizing, so it keeps the original penalty.
+  if (input.website_age_status === "outdated") score += 4;
+  else if (!input.website_url) score += 3;
+  else score -= 2;
 
   // Review count — sweet spot is established but not review-dominant
   if (input.review_count !== null && input.review_count < 20) score += 2;
