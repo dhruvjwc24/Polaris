@@ -76,7 +76,15 @@ export async function checkReplies(): Promise<void> {
     const bodyData = bodyPart?.body?.data ?? "";
     const body = Buffer.from(bodyData, "base64url").toString("utf-8");
 
-    const intent = await classifyReply(body);
+    let intent: ReplyIntent;
+    try {
+      intent = await classifyReply(body);
+    } catch (err) {
+      // e.g. Anthropic API failure — leave the lead unclassified so it's
+      // retried next tick instead of dropping every other thread's check.
+      console.error(`[replyMonitor] classification failed for lead ${leadId}:`, err);
+      continue;
+    }
 
     await db
       .from("leads")

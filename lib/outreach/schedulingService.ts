@@ -1,5 +1,6 @@
 import { db } from "@/lib/db/supabase";
 import { getGmailClient, buildRfc2822 } from "./gmailClient";
+import { canSendOutreachEmail } from "./rateLimiter";
 
 const CALENDLY_URL = process.env.CALENDLY_URL ?? "";
 
@@ -12,6 +13,11 @@ export async function sendSchedulingEmail(leadId: string): Promise<void> {
     .maybeSingle();
 
   if (!lead?.email) return;
+
+  if (!(await canSendOutreachEmail())) {
+    console.log(`Outreach send-rate cap reached, skipping scheduling email for ${leadId} until tomorrow`);
+    return;
+  }
 
   const gmail = getGmailClient();
   const originalMessage = lead.outreach_messages?.[0];

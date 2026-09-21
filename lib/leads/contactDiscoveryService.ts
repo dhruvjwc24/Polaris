@@ -47,6 +47,47 @@ function isRealEmail(email: string): boolean {
   return !JUNK_EMAIL_PATTERNS.some((pattern) => email.includes(pattern));
 }
 
+// Personal-email providers are common and legitimate for small local
+// businesses (many run their business off a personal Gmail), so they can't
+// be checked against the business name the way a company domain can — treat
+// them as always plausible.
+const PERSONAL_EMAIL_PROVIDERS = [
+  "gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
+  "icloud.com", "aol.com", "protonmail.com", "live.com",
+];
+
+const NAME_STOPWORDS = new Set([
+  "the", "and", "of", "inc", "llc", "co", "corp", "company", "group",
+  "services", "service", "shop", "store",
+]);
+
+function significantTokens(businessName: string): string[] {
+  return businessName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !NAME_STOPWORDS.has(word));
+}
+
+// A broad web search can surface a page that happens to mention some
+// unrelated email address (confirmed live: a nonsense test business matched
+// a scraped @baidu.com address) instead of one actually belonging to the
+// business. Since these fallback searches have no other signal tying the
+// email to the business, require the domain to either be a personal
+// provider or share a name token with the business — otherwise the match is
+// too weak to trust automatically.
+function isLikelyRelatedEmail(email: string, businessName: string): boolean {
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) return false;
+  if (PERSONAL_EMAIL_PROVIDERS.includes(domain)) return true;
+
+  const domainLabel = domain.split(".")[0];
+  const tokens = significantTokens(businessName);
+  if (!tokens.length) return false;
+
+  return tokens.some((token) => domainLabel.includes(token) || token.includes(domainLabel));
+}
+
 // ── Website scraping ──────────────────────────────────────────────────────────
 
 interface ScrapedContacts {
@@ -145,7 +186,8 @@ async function findEmailViaSearch(
   const links = await webSearch(`"${businessName}" "${city}" email contact`);
   for (const link of links.slice(0, 3)) {
     const { emails } = await scrapeWebsite(link);
-    if (emails.length) return emails[0];
+    const match = emails.find((email) => isLikelyRelatedEmail(email, businessName));
+    if (match) return match;
   }
   return null;
 }
@@ -174,13 +216,17 @@ async function findContactViaBroadSearch(
   city: string
 ): Promise<{ email: string | null; phone: string | null }> {
   const links = await webSearch(`"${businessName}" "${city}" phone number email contact`);
+  let email: string | null = null;
+  let phone: string | null = null;
+
   for (const link of links.slice(0, 3)) {
     const { emails, phones } = await scrapeWebsite(link);
-    if (emails.length || phones.length) {
-      return { email: emails[0] ?? null, phone: phones[0] ?? null };
-    }
+    if (!email) email = emails.find((e) => isLikelyRelatedEmail(e, businessName)) ?? null;
+    if (!phone) phone = phones[0] ?? null;
+    if (email && phone) break;
   }
-  return { email: null, phone: null };
+
+  return { email, phone };
 }
 
 // ── Facebook Pages API ────────────────────────────────────────────────────────

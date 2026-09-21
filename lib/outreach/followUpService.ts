@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db/supabase";
 import { getGmailClient, buildRfc2822 } from "./gmailClient";
+import { canSendOutreachEmail } from "./rateLimiter";
 import type { Lead } from "@/lib/types";
 
 const client = new Anthropic();
@@ -28,8 +29,11 @@ async function generateFollowUp(lead: Lead, angle: "gap" | "competitor"): Promis
 export async function processFollowUps(): Promise<void> {
   const now = new Date();
   const gmail = getGmailClient();
+  let rateCapped = false;
 
   for (const config of FOLLOW_UP_CONFIG) {
+    if (rateCapped) break;
+
     const cutoff = new Date(now.getTime() - config.days * 24 * 60 * 60 * 1000).toISOString();
 
     const { data: leads } = await db
@@ -41,7 +45,19 @@ export async function processFollowUps(): Promise<void> {
     if (!leads?.length) continue;
 
     for (const lead of leads) {
-      const body = await generateFollowUp(lead, config.angle as "gap" | "competitor");
+      if (!(await canSendOutreachEmail())) {
+        console.log(`Outreach send-rate cap reached, deferring remaining follow-ups until tomorrow`);
+        rateCapped = true;
+        break;
+      }
+
+      let body: string;
+      try {
+        body = await generateFollowUp(lead, config.angle as "gap" | "competitor");
+      } catch (err) {
+        console.error(`[followUps] generation failed for lead ${lead.id}:`, err);
+        continue;
+      }
       if (!body || !lead.email) continue;
 
       const originalMessage = lead.outreach_messages?.[0];

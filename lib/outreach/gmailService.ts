@@ -1,5 +1,6 @@
 import { db } from "@/lib/db/supabase";
 import { getGmailClient, buildRfc2822 } from "./gmailClient";
+import { canSendOutreachEmail } from "./rateLimiter";
 import type { Lead } from "@/lib/types";
 
 const SUBJECT_LINES = [
@@ -26,6 +27,11 @@ export async function sendOutreach(leadId: string, force = false): Promise<void>
   const { data: lead } = await query.maybeSingle();
 
   if (!lead?.email || !lead.cold_message) return;
+
+  if (!(await canSendOutreachEmail())) {
+    console.log(`Outreach send-rate cap reached, skipping ${leadId} until tomorrow`);
+    return;
+  }
 
   const gmail = getGmailClient();
   const subject = pickSubject(lead.business_name);

@@ -4,6 +4,13 @@ import type { Lead } from "@/lib/types";
 
 const client = new Anthropic();
 const BUCKET = "pictures";
+// A batch of 10 leads' full enrichment output (diagnosis, site_brief,
+// cold_message, site_structure) regularly exceeded the old 4096-token cap,
+// silently truncating the JSON mid-object and dropping the whole batch
+// (confirmed live via repeated "[enrich] JSON parse failed" errors). 5 leads
+// per call with a larger cap gives real headroom instead of running right up
+// against the limit.
+const ENRICH_BATCH_SIZE = 5;
 const PLACES_PHOTO_BASE = "https://maps.googleapis.com/maps/api/place/photo";
 
 interface EnrichmentResult {
@@ -139,15 +146,24 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<boo
 
   let anySuccess = false;
 
-  // Process in batches of 10
-  for (let i = 0; i < leads.length; i += 10) {
-    const batch = leads.slice(i, i + 10) as Lead[];
+  // Process in batches (see ENRICH_BATCH_SIZE for why 5, not 10)
+  for (let i = 0; i < leads.length; i += ENRICH_BATCH_SIZE) {
+    const batch = leads.slice(i, i + ENRICH_BATCH_SIZE) as Lead[];
 
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: buildPrompt(batch) }],
-    });
+    let message;
+    try {
+      message = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        messages: [{ role: "user", content: buildPrompt(batch) }],
+      });
+    } catch (err) {
+      // A single batch's API failure (e.g. rate limit, low credit balance)
+      // must not stop the remaining batches, or the rest of the pipeline —
+      // this leaves the batch's leads at 'new' so they retry next tick.
+      console.error("[enrich] Anthropic API call failed for batch:", err);
+      continue;
+    }
 
     const raw = message.content[0].type === "text" ? message.content[0].text : "";
 
