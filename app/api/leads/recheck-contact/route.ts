@@ -15,10 +15,18 @@ export async function POST(req: Request) {
 
   const { data: lead, error } = await db
     .from("leads")
-    .select("email, phone, needs_contact_review")
+    .select("email, phone, facebook_url, instagram_url, needs_contact_review")
     .eq("id", parsed.data.id)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Re-search found nothing at all (no email, phone, or social) — scratch the
+  // lead entirely rather than leaving it to sit in review forever.
+  if (lead && !lead.email && !lead.phone && !lead.facebook_url && !lead.instagram_url) {
+    await db.from("leads").delete().eq("id", parsed.data.id);
+    return NextResponse.json({ scratched: true });
+  }
+
   return NextResponse.json(lead);
 }

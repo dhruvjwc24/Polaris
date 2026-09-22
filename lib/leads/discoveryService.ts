@@ -1,13 +1,15 @@
 import { db } from "@/lib/db/supabase";
-import { scoreLead } from "./scoring";
-import { classifyWebsiteAge } from "./websiteAge";
+import { scoreLead, isLeadEligible } from "./scoring";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 const MAX_LEADS = 15;
-// Anything scoring below this on the combined signals — website status,
-// reviews, rating, tenure, search prominence — isn't a strong enough
-// prospect to spend a mockup + outreach cycle on.
-const MIN_PRIORITY_SCORE = 7;
+// Anything scoring below this on the combined signals — reviews, rating,
+// tenure, search prominence — isn't a strong enough prospect to spend a
+// mockup + outreach cycle on. 6 is the practical floor given the current
+// rubric: isLeadEligible's hard cutoffs (review_count, rating, tenure) mean
+// nothing can score below 5, and 5 itself is deliberately excluded too — see
+// CLAUDE.md "Targeting: No-Website Leads Only".
+const MIN_PRIORITY_SCORE = 6;
 
 interface PlacePhoto {
   photo_reference: string;
@@ -72,7 +74,7 @@ async function fetchPage(
   return { results: data.results ?? [], next_page_token: data.next_page_token };
 }
 
-async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
+export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
   const fields =
     "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews,opening_hours";
   const res = await fetch(
@@ -85,7 +87,7 @@ async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
 
 // Trust the Places API URL unless the domain is completely dead (DNS failure / connection refused).
 // HEAD requests are widely blocked by hosting providers — a 4xx still means a real site exists.
-async function isDomainDead(url: string): Promise<boolean> {
+export async function isDomainDead(url: string): Promise<boolean> {
   try {
     await fetch(url, { method: "GET", signal: AbortSignal.timeout(6000) });
     return false; // any response (even 4xx) means the domain is live
@@ -157,6 +159,10 @@ export async function discoverLeads(
       let websiteUrl: string | null = detail.website ?? null;
       if (websiteUrl && (await isDomainDead(websiteUrl))) websiteUrl = null;
 
+      // No-website businesses only (2026-09-21 pivot) — skip before doing any
+      // more work on this candidate.
+      if (websiteUrl) continue;
+
       // Deduplicate within this campaign only — same business can appear in separate campaigns
       const { data: existing } = await db
         .from("leads")
@@ -166,13 +172,14 @@ export async function discoverLeads(
         .maybeSingle();
       if (existing) continue;
 
-      const websiteAgeStatus = websiteUrl ? await classifyWebsiteAge(websiteUrl) : null;
+      const reviewCount = detail.user_ratings_total ?? null;
+      const rating = detail.rating ?? null;
+
+      if (!isLeadEligible({ review_count: reviewCount, rating, years_established: null })) continue;
 
       const score = scoreLead({
-        website_url: websiteUrl,
-        website_age_status: websiteAgeStatus,
-        review_count: detail.user_ratings_total ?? null,
-        rating: detail.rating ?? null,
+        review_count: reviewCount,
+        rating,
         years_established: null,
         position: i,
       });
@@ -188,9 +195,9 @@ export async function discoverLeads(
         city,
         niche,
         google_maps_id: detail.place_id,
-        review_count: detail.user_ratings_total ?? null,
-        rating: detail.rating ?? null,
-        website_age_status: websiteAgeStatus,
+        review_count: reviewCount,
+        rating,
+        search_position: i,
         photo_refs: detail.photos?.slice(0, 10).map((p) => p.photo_reference) ?? null,
         review_snippets: detail.reviews
           ?.filter((r) => r.rating >= 4 && r.text.trim().length > 20)

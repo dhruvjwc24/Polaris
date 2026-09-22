@@ -43,7 +43,7 @@ const JUNK_EMAIL_PATTERNS = [
   "squarespace.com", "godaddy.com", "@2x", ".png", ".jpg", ".gif", ".svg",
 ];
 
-function isRealEmail(email: string): boolean {
+export function isRealEmail(email: string): boolean {
   return !JUNK_EMAIL_PATTERNS.some((pattern) => email.includes(pattern));
 }
 
@@ -76,7 +76,7 @@ function significantTokens(businessName: string): string[] {
 // email to the business, require the domain to either be a personal
 // provider or share a name token with the business — otherwise the match is
 // too weak to trust automatically.
-function isLikelyRelatedEmail(email: string, businessName: string): boolean {
+export function isLikelyRelatedEmail(email: string, businessName: string): boolean {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return false;
   if (PERSONAL_EMAIL_PROVIDERS.includes(domain)) return true;

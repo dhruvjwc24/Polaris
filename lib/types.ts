@@ -45,6 +45,7 @@ export interface Lead {
   review_count: number | null;
   rating: number | null;
   years_established: number | null;
+  search_position: number | null;
   source: LeadSource;
   diagnosis: string | null;
   outreach_angle: string | null;
@@ -69,6 +70,13 @@ export interface Lead {
   priority_score: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReferenceExample {
+  id: string;
+  url: string;
+  note: string | null;
+  created_at: string;
 }
 
 export interface Campaign {

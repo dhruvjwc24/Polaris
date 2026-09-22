@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db/supabase";
-import { scoreLead } from "./scoring";
+import { scoreLead, isLeadEligible } from "./scoring";
 
 const LeadRowSchema = z.object({
   business_name: z.string().min(1),
@@ -12,7 +12,9 @@ const LeadRowSchema = z.object({
   location: z.string().optional().nullable(),
   review_count: z.coerce.number().int().nonnegative().optional().nullable(),
   rating: z.coerce.number().min(0).max(5).optional().nullable(),
-  years_established: z.coerce.number().int().nonnegative().optional().nullable(),
+  // Fractional years allowed (e.g. 0.5 = 6 months) — isLeadEligible's tenure
+  // cutoff is sub-year.
+  years_established: z.coerce.number().nonnegative().optional().nullable(),
 });
 
 export type LeadImportRow = z.input<typeof LeadRowSchema>;
@@ -33,12 +35,25 @@ export async function importLeads(
     }
 
     const row = parsed.data;
-    const score = scoreLead({
-      website_url: row.website_url ?? null,
+
+    if (row.website_url) {
+      errors.push(`${row.business_name}: has a website, no longer a target — skipped`);
+      skipped++;
+      continue;
+    }
+
+    const eligibilityInput = {
       review_count: row.review_count ?? null,
       rating: row.rating ?? null,
       years_established: row.years_established ?? null,
-    });
+    };
+    if (!isLeadEligible(eligibilityInput)) {
+      errors.push(`${row.business_name}: doesn't meet the minimum reviews/rating/tenure bar — skipped`);
+      skipped++;
+      continue;
+    }
+
+    const score = scoreLead(eligibilityInput);
 
     const { error } = await db.from("leads").insert({
       campaign_id: campaignId,

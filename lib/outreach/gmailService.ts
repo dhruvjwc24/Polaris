@@ -16,8 +16,24 @@ function pickSubject(businessName: string): string {
 
 function buildBody(lead: Lead): string {
   const lines = [lead.cold_message ?? ""];
+  // One link only (2026-09-22, deliverability research) — and it has to be
+  // the video, not the mockup: lovable_url currently resolves to
+  // localhost:3000 (Polaris isn't deployed anywhere public), so it's only
+  // ever usable by Cyril himself sharing his own screen on a call. The video
+  // is hosted on Supabase storage — a real public URL — so it's the only
+  // link that actually works for the recipient. Do not swap this back to
+  // lovable_url until Polaris is deployed publicly.
   if (lead.video_url) lines.push(`\n10-second walkthrough: ${lead.video_url}`);
-  if (lead.lovable_url) lines.push(`Full preview: ${lead.lovable_url}`);
+  // Static, not AI-generated, so it's guaranteed to be in every send — since
+  // these are now built from a generic template (no-website leads only,
+  // 2026-09-21 pivot), we can't know what each business specifically wants
+  // added, so we offer to add it instead. Names concrete examples (pages a
+  // competitor site, woodbridgeroofers.com, actually had) rather than a
+  // vague "anything," per Cyril 2026-09-22 — specific reads as credible,
+  // vague reads as a throwaway line.
+  lines.push(
+    "\nHappy to add more to this — extra pages for services, financing, the areas you serve, whatever's useful. Just let me know."
+  );
   return lines.join("\n");
 }
 

@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { Lead, ReviewSnippet } from "@/lib/types";
+import { safeHref } from "@/lib/safeHref";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -1218,7 +1219,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
               {(lead.instagram_url || lead.facebook_url) && (
                 <div style={{ display: "flex", gap: 8 }}>
                   {lead.instagram_url && (
-                    <a href={lead.instagram_url} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="Instagram">
+                    <a href={safeHref(lead.instagram_url)} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="Instagram">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
                         <path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/>
@@ -1227,7 +1228,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                     </a>
                   )}
                   {lead.facebook_url && (
-                    <a href={lead.facebook_url} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="Facebook">
+                    <a href={safeHref(lead.facebook_url)} target="_blank" rel="noopener noreferrer" className="social-link" aria-label="Facebook">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
                       </svg>

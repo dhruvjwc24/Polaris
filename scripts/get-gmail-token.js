@@ -1,3 +1,4 @@
+require("dotenv").config({ path: ".env.local" });
 const { google } = require("googleapis");
 const http = require("http");
 const url = require("url");

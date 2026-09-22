@@ -8,10 +8,17 @@ import type { Lead } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [{ data: leads }, { data: manualLeads }, { count: needsReviewCount }] = await Promise.all([
+  const [{ data: leads }, { data: manualLeads }, { count: needsReviewCount }, { count: manualOutreachCount }] = await Promise.all([
     db.from("leads").select("*").not("status", "eq", "archived").order("priority_score", { ascending: false }),
     db.from("leads").select("*").eq("source", "manual").order("created_at", { ascending: false }),
     db.from("leads").select("id", { count: "exact", head: true }).eq("needs_contact_review", true).not("status", "eq", "archived"),
+    db
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .is("email", null)
+      .not("phone", "is", null)
+      .eq("status", "video_ready")
+      .eq("manual_contact_done", false),
   ]);
 
   return (
@@ -36,6 +43,12 @@ export default async function Home() {
           </Link>
           <Link href="/leads/needs-review" className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1.5">
             Needs Contact Info{needsReviewCount ? ` (${needsReviewCount})` : ""}
+          </Link>
+          <Link href="/leads/manual-outreach" className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1.5">
+            Manual Outreach{manualOutreachCount ? ` (${manualOutreachCount})` : ""}
+          </Link>
+          <Link href="/examples" className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1.5">
+            Examples
           </Link>
           <Link href="/analytics" className="text-sm text-gray-400 hover:text-gray-200 px-2 py-1.5">
             Analytics

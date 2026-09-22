@@ -59,6 +59,9 @@ export async function processFollowUps(): Promise<void> {
         continue;
       }
       if (!body || !lead.email) continue;
+      // Same static, non-AI-generated offer as the initial email — see
+      // gmailService.ts for why it's worded with concrete examples.
+      body += "\n\nHappy to add more to this — extra pages for services, financing, the areas you serve, whatever's useful. Just let me know.";
 
       const originalMessage = lead.outreach_messages?.[0];
       const subject = `Re: ${originalMessage?.subject ?? `Quick mockup for ${lead.business_name}`}`;

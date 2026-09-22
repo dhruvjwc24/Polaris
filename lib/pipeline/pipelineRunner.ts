@@ -1,5 +1,11 @@
 import { db } from "@/lib/db/supabase";
-import { flagUnreachableLeads } from "@/lib/leads/reachability";
+import {
+  flagUnreachableLeads,
+  deleteHasWebsiteLeads,
+  deleteLowScoreLeads,
+  deleteIneligibleLeads,
+} from "@/lib/leads/reachability";
+import { refreshLeadData } from "@/lib/leads/refreshLeadData";
 import { discoverContacts } from "@/lib/leads/contactDiscoveryService";
 import { enrichLeads } from "@/lib/leads/enrichmentService";
 import { templateProvider } from "@/lib/mockup/templateMockup";
@@ -24,12 +30,43 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
   // than enrichment and shouldn't silently stop firing every 15 minutes just
   // because an earlier, unrelated stage broke.
 
-  // 0. Flag leads with no email and no phone for manual review — backstop for
-  //    leads that skipped contactDiscoveryService entirely (e.g. CSV imports).
+  // 0a. Refresh review_count/rating/website_url from live Places data before
+  //     any filtering decisions run off them — see lib/leads/refreshLeadData.ts.
+  try {
+    await refreshLeadData();
+  } catch (err) {
+    console.error("Stage failed: refreshLeadData:", err);
+  }
+
+  // 0b. Flag leads with no email and no phone for manual review — backstop
+  //     for leads that skipped contactDiscoveryService entirely (e.g. CSV imports).
   try {
     await flagUnreachableLeads();
   } catch (err) {
     console.error("Stage failed: flagUnreachableLeads:", err);
+  }
+
+  // 0c. Filtering net, part 1 — delete any lead that already has a website.
+  //     See lib/leads/reachability.ts for why.
+  try {
+    await deleteHasWebsiteLeads();
+  } catch (err) {
+    console.error("Stage failed: deleteHasWebsiteLeads:", err);
+  }
+
+  // 0d. Filtering net, part 2 — delete any lead scoring below 6.
+  try {
+    await deleteLowScoreLeads();
+  } catch (err) {
+    console.error("Stage failed: deleteLowScoreLeads:", err);
+  }
+
+  // 0e. Filtering net, part 3 — delete any lead failing the hard eligibility
+  //     cutoffs (reviews, rating, tenure). See lib/leads/reachability.ts.
+  try {
+    await deleteIneligibleLeads();
+  } catch (err) {
+    console.error("Stage failed: deleteIneligibleLeads:", err);
   }
 
   // 1. Contact discovery — find email and social media for new leads.
@@ -72,11 +109,18 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
     console.error("Stage failed: enrichLeads:", err);
   }
 
-  // 3. Build mockups for top leads (brief_ready, sorted by priority_score)
+  // 3. Build mockups for top leads (brief_ready, sorted by priority_score).
+  //    No-website leads only — a business that already has a site, even an
+  //    outdated one, isn't a fit for a generic mockup template (Cyril found
+  //    real 6-7/10 existing sites that beat it on custom structure/content
+  //    the template can't replicate per-business). The score cutoff for
+  //    which no-website leads qualify is still being worked out — see
+  //    CLAUDE.md "Targeting: No-Website Leads Only".
   const mockupQuery = db
     .from("leads")
     .select("id, site_brief, business_name")
     .eq("status", "brief_ready")
+    .is("website_url", null)
     .order("priority_score", { ascending: false })
     .limit(MOCKUP_BATCH_SIZE);
   if (campaignId) mockupQuery.eq("campaign_id", campaignId);
@@ -152,12 +196,19 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
 
   // 8. Send outreach for video_ready leads that have an email — lowest send
   //    priority; gets whatever's left of today's rate-limited budget.
+  //    Capped to ONE send per tick (2026-09-22, deliverability research):
+  //    the daily cap alone still allowed every eligible lead to send
+  //    back-to-back within a single tick — a burst pattern that's a spam
+  //    signal independent of the daily total. One per 15-minute tick spreads
+  //    sends across the day instead (5/day takes ≥75min, 20/day takes ≥5hr).
   const outreachQuery = db
     .from("leads")
     .select("id")
     .eq("status", "video_ready")
     .eq("manual_outreach_only", false)
-    .not("email", "is", null);
+    .not("email", "is", null)
+    .order("priority_score", { ascending: false })
+    .limit(1);
   if (campaignId) outreachQuery.eq("campaign_id", campaignId);
   const { data: outreachLeads } = await outreachQuery;
 

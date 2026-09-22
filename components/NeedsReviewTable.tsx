@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Lead } from "@/lib/types";
+import { safeHref } from "@/lib/safeHref";
 
 export function NeedsReviewTable({ leads }: { leads: Lead[] }) {
   const router = useRouter();
@@ -29,11 +30,15 @@ export function NeedsReviewTable({ leads }: { leads: Lead[] }) {
   async function searchAgain(id: string) {
     setSearchingId(id);
     try {
-      await fetch("/api/leads/recheck-contact", {
+      const res = await fetch("/api/leads/recheck-contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      const result = await res.json().catch(() => ({}));
+      if (result.scratched) {
+        alert("Still nothing found (no email, phone, or social) — lead deleted.");
+      }
       router.refresh();
     } finally {
       setSearchingId(null);
@@ -91,6 +96,8 @@ export function NeedsReviewTable({ leads }: { leads: Lead[] }) {
             <th className="text-left py-2 pr-4 font-normal">Niche</th>
             <th className="text-left py-2 pr-4 font-normal">Email</th>
             <th className="text-left py-2 pr-4 font-normal">Phone</th>
+            <th className="text-left py-2 pr-4 font-normal">Facebook</th>
+            <th className="text-left py-2 pr-4 font-normal">Instagram</th>
             <th className="text-left py-2 pr-4 font-normal"></th>
           </tr>
         </thead>
@@ -109,6 +116,24 @@ export function NeedsReviewTable({ leads }: { leads: Lead[] }) {
               <td className="py-2 pr-4 text-gray-400">{lead.niche}</td>
               <td className="py-2 pr-4 text-gray-400">{lead.email ?? "—"}</td>
               <td className="py-2 pr-4 text-gray-400">{lead.phone ?? "—"}</td>
+              <td className="py-2 pr-4 text-gray-400">
+                {lead.facebook_url ? (
+                  <a href={safeHref(lead.facebook_url)} target="_blank" rel="noreferrer" className="hover:text-white underline">
+                    Open
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </td>
+              <td className="py-2 pr-4 text-gray-400">
+                {lead.instagram_url ? (
+                  <a href={safeHref(lead.instagram_url)} target="_blank" rel="noreferrer" className="hover:text-white underline">
+                    Open
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </td>
               <td className="py-2 pr-4 flex items-center gap-2">
                 <button
                   onClick={() => searchAgain(lead.id)}

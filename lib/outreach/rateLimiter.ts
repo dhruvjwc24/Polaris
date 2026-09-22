@@ -38,7 +38,7 @@ async function getAnchorDate(): Promise<Date> {
   return data?.sent_at ? new Date(data.sent_at) : new Date();
 }
 
-function dailyCapForDay(dayIndex: number): number {
+export function dailyCapForDay(dayIndex: number): number {
   if (dayIndex >= RAMP_DAYS) {
     const daysPastRamp = dayIndex - RAMP_DAYS + 1;
     return Math.min(RAMP_MAX_DAILY, RAMP_TARGET + daysPastRamp * RAMP_DAILY_INCREMENT_AFTER);
@@ -65,6 +65,17 @@ export async function getRemainingSendBudget(): Promise<number> {
   return Math.max(0, cap - (count ?? 0));
 }
 
+// Hard stop for the testing/building phase, separate from the Anthropic
+// spend gate (PAUSE_ENRICHMENT) — 2026-09-22: emails slipped out mid-build
+// (2 sent while Cyril was still deciding targeting strategy) because nothing
+// blocked sending itself, only rate-limited its volume. That's a real gap:
+// throttling to 5/day still means real emails hit real inboxes without an
+// explicit go-ahead. This is the single choke point all three send paths
+// (gmailService, schedulingService, followUpService) already share — gate
+// here once, rather than in three call sites where a fourth path could
+// forget it. Leave PAUSE_OUTREACH=true until Cyril says testing/building is
+// fully done and he wants real sending to start.
 export async function canSendOutreachEmail(): Promise<boolean> {
+  if (process.env.PAUSE_OUTREACH === "true") return false;
   return (await getRemainingSendBudget()) > 0;
 }
