@@ -17,12 +17,17 @@
  */
 
 import { db } from "@/lib/db/supabase";
+import { isTestMode } from "./testMode";
 
+// Ceiling capped at 10/day permanently, per Cyril 2026-09-22 — was a 20/day
+// ramp target climbing to a 50/day hard max; he wants the ramp behavior
+// (start low, climb gradually) but with 10 as a hard permanent ceiling, not
+// a waypoint it keeps growing past.
 const RAMP_START = Number(process.env.OUTREACH_RAMP_START ?? 5);
-const RAMP_TARGET = Number(process.env.OUTREACH_RAMP_TARGET ?? 20);
+const RAMP_TARGET = Number(process.env.OUTREACH_RAMP_TARGET ?? 10);
 const RAMP_DAYS = Number(process.env.OUTREACH_RAMP_DAYS ?? 7);
 const RAMP_DAILY_INCREMENT_AFTER = Number(process.env.OUTREACH_RAMP_DAILY_INCREMENT_AFTER ?? 2);
-const RAMP_MAX_DAILY = Number(process.env.OUTREACH_RAMP_MAX_DAILY ?? 50);
+const RAMP_MAX_DAILY = Number(process.env.OUTREACH_RAMP_MAX_DAILY ?? 10);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -65,17 +70,25 @@ export async function getRemainingSendBudget(): Promise<number> {
   return Math.max(0, cap - (count ?? 0));
 }
 
-// Hard stop for the testing/building phase, separate from the Anthropic
-// spend gate (PAUSE_ENRICHMENT) — 2026-09-22: emails slipped out mid-build
-// (2 sent while Cyril was still deciding targeting strategy) because nothing
+// PAUSE_OUTREACH is a hard stop separate from the Anthropic spend gate
+// (PAUSE_ENRICHMENT) — 2026-09-22: emails slipped out mid-build (2 sent
+// while Cyril was still deciding targeting strategy) because nothing
 // blocked sending itself, only rate-limited its volume. That's a real gap:
 // throttling to 5/day still means real emails hit real inboxes without an
 // explicit go-ahead. This is the single choke point all three send paths
-// (gmailService, schedulingService, followUpService) already share — gate
-// here once, rather than in three call sites where a fourth path could
-// forget it. Leave PAUSE_OUTREACH=true until Cyril says testing/building is
-// fully done and he wants real sending to start.
+// (gmailService, schedulingService, followUpService) share — gate here
+// once, rather than in three call sites where a fourth path could forget
+// it. Cyril confirmed go-live 2026-09-22; PAUSE_OUTREACH is now false, but
+// the gate itself stays in the code as the default-safe fallback.
+//
+// Test mode (lib/outreach/testMode.ts) bypasses this gate entirely, folded
+// in here rather than left to each of the three call sites to remember
+// (that was the original bug this file warns about, just for a different
+// gate) — a redirected test send can't hit the real rate budget or
+// PAUSE_OUTREACH's protection because it was never going to reach a real
+// business in the first place.
 export async function canSendOutreachEmail(): Promise<boolean> {
+  if (isTestMode()) return true;
   if (process.env.PAUSE_OUTREACH === "true") return false;
   return (await getRemainingSendBudget()) > 0;
 }

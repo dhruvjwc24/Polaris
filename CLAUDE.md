@@ -442,22 +442,18 @@ check below. If it prints a number greater than 0, remind Cyril: "There are N le
 your manual outreach pile (phone only, no email) — want the list?" before proceeding. If 0,
 skip this prompt entirely.
 
-## Pending DB Migrations
+## DB Migrations
 
-As of 2026-09-22, four migrations exist as files but haven't been applied to the live Supabase
-DB yet (this environment has no `supabase` CLI or direct Postgres connection — apply these
-yourself in the Supabase SQL editor, in order):
-- `013_manual_contact_done.sql` — needed for `/leads/manual-outreach` to work at all
-- `014_years_established_numeric.sql` — not urgent, see "Known gap" above
-- `015_search_position.sql` — needed for `refreshLeadData()` to preserve the search-position
-  score bonus across refreshes instead of zeroing it out; also means fresh discovery runs can't
-  store `search_position` until this is applied
-- `016_reference_examples.sql` — needed for `/examples` to work at all
+All migrations through `017_opted_out.sql` are applied and confirmed live (verified directly
+against the DB 2026-09-22 — this section previously said 013-017 were pending, which was stale;
+013-016 had actually been applied earlier, and 017 was applied same-day as it was written). This
+environment has no `supabase` CLI or direct Postgres connection — any future migration file
+needs Cyril to apply it himself in the Supabase SQL editor, one at a time, in order.
 
-**When a session opens Polaris and is about to touch discovery, refresh, or the manual-outreach
-pile:** check whether these look applied (e.g. a query against the relevant column/table
-erroring with "does not exist") before assuming a bug — it's very likely just a migration Cyril
-hasn't run yet, not broken code.
+**When a session opens Polaris and adds a new migration file:** don't assume it's applied just
+because the file exists in the repo — verify directly against the DB (a query against the new
+column/table erroring "does not exist" means it's still pending) rather than trusting this
+section's prose, which has gone stale before.
 
 ## Video Queue
 
@@ -561,28 +557,91 @@ Cloud project), the remaining work is code-side and this environment can do it: 
 itself publicly is a separate, non-urgent nice-to-have — see "`lovable_url` Resolves to
 localhost" above for why it isn't blocking anything today.
 
-## Testing-Phase Gates
+## CAN-SPAM Compliance
 
-Two independent hard stops in `.env.local`, both must stay `true` until Cyril explicitly says
-to move into the real customer-acquisition phase. Don't flip either one, and don't manually
-trigger enrichment or a real send to test something, without asking Cyril first each time.
+Added 2026-09-22 after an audit flagged two legally required elements missing from every
+outreach email: a physical mailing address and a clear opt-out mechanism. Both now apply to
+all three send paths (`gmailService.ts` cold outreach, `followUpService.ts`, `schedulingService.ts`
+scheduling replies) — commercial email requires this on every message in a thread, not just the
+first.
 
-**`PAUSE_ENRICHMENT=true`** — blocks the two Anthropic-cost stages the always-on scheduler
-would otherwise run unattended every 15 minutes: new-lead enrichment and follow-up generation
-(see `pipelineRunner.ts` stages 2 and 7).
+- **`lib/outreach/canSpamFooter.ts`** — shared footer appended to every outbound body: the
+  address from `OUTREACH_MAILING_ADDRESS` (`.env.local`) plus a plain-language opt-out
+  instruction ("reply unsubscribe"). **Throws if the env var is unset**, so a missing address
+  fails the send loudly instead of shipping a non-compliant email. Needs a real PO Box / UPS
+  Store address filled in before `PAUSE_OUTREACH` ever comes off — ask Cyril if it's still blank.
+- **Opt-out enforcement, not just the ask**: `leads.opted_out` (migration `017_opted_out.sql`)
+  is checked before every send in all three paths — `gmailService.ts` and `schedulingService.ts`
+  return early on an opted-out lead, `followUpService.ts` filters it out of the query directly.
+  `replyMonitor.ts`'s AI classifier gained a fifth intent, `unsubscribe` (any request to stop
+  emails, however phrased) — a reply classified that way sets `opted_out=true` and archives the
+  lead immediately, on the next scheduler tick, well inside the legal 10-business-day window.
+- Test coverage: `lib/outreach/canSpamFooter.test.ts` (throws when unset, includes address +
+  opt-out language when set).
 
-**`PAUSE_OUTREACH=true`**, added 2026-09-22 — blocks all outbound email (cold outreach,
-scheduling replies, follow-ups) outright, checked inside `canSendOutreachEmail()`
-(`lib/outreach/rateLimiter.ts`), the single choke point all three send paths already share.
-**Why this exists as its own gate, separate from the rate limiter:** on 2026-09-21, lifting the
-`manual_outreach_only` pause + the rate limiter being in place was treated as sufficient — but
-rate-limiting to 5/day still means real emails go out with no explicit per-batch go-ahead. 2
-emails slipped out to real businesses while targeting strategy was still being decided. The
-rate limiter throttles volume; `PAUSE_OUTREACH` is what actually stops sending. Keep both —
-don't remove the rate limiter once this comes off, they solve different problems.
+## Simulation / Test Mode
 
-Once Cyril confirms testing/building is fully done and he wants real sending to start, both
-gates can come off and this section should be removed.
+Added 2026-09-22 to run a full pipeline dry run (discovery → enrich → mockup → video → "send")
+without ever touching a real business's inbox or discovering more leads than intended for a
+short test. Three independent env vars, all meant to be temporary and reverted after testing:
+
+- **`DISCOVERY_MAX_LEADS`** (`lib/leads/discoveryService.ts`) — overrides the normal
+  **unlimited** discovery run (no cap by default since 2026-09-22, per Cyril — discovery finding
+  a lot of leads is fine, it's the outreach send rate that gates real-world volume). Set low
+  (e.g. `5`) for a controlled test so it doesn't burn through Google Places quota or hand
+  enrichment a big batch. **Remove/reset after testing.**
+- **`DISABLE_PIPELINE_SCHEDULER`** (`lib/pipeline/scheduler.ts`) — when `true`, skips starting
+  the always-on 15-minute scheduler tick entirely, so pipeline stages only run when explicitly
+  triggered via `POST /api/pipeline`. Lets a test run be driven and observed one step at a time
+  instead of an unattended interval also firing mid-test. **Remove after testing** — the
+  scheduler is meant to be always-on in real operation.
+- **`OUTREACH_TEST_MODE` + `OUTREACH_TEST_EMAIL`** (`lib/outreach/testMode.ts`) — when test mode
+  is on, all three send paths (`gmailService.ts`, `followUpService.ts`, `schedulingService.ts`)
+  call `resolveSendTarget()` (the single shared helper — recipient, subject, thread-suppression,
+  and the `[TEST MODE] Redirecting...` log line all live there once, not duplicated per file) to
+  unconditionally redirect the recipient to `OUTREACH_TEST_EMAIL` instead of the lead's real
+  email. Subject line gets a `[TEST]` prefix plus the real lead's email inline, so a test send is
+  unmistakable and still tells you who it would have gone to. `canSendOutreachEmail()`
+  (`lib/outreach/rateLimiter.ts`) itself checks `isTestMode()` first and returns `true`
+  immediately — the bypass is centralized in the one shared gate function, not repeated at each
+  call site (a fourth send path added later can't forget it).
+  **Critically: a test-mode send must NOT touch the lead's real DB state.** Each of the three
+  send functions checks `target.testMode` after the (redirected) Gmail send and returns/continues
+  before writing to `outreach_messages` or updating the lead's `status`. Found live 2026-09-22 —
+  an earlier version let a test send advance a real lead (`GLS Tech Electrical Contractor`) to
+  `outreach_sent` even though the email only reached Cyril's inbox; once test mode was turned
+  back off, the real business no longer matched any status filter and would never have gotten a
+  real send without a manual DB reset. Don't reintroduce this — a test send is a dry run of
+  content and delivery only, never of pipeline progress.
+  **This is a bypass of the gate, not a weakening of it** — `PAUSE_OUTREACH` stays `true`
+  throughout a test run as a second independent layer: if `OUTREACH_TEST_MODE` were ever
+  accidentally off, the outreach stage falls back to being fully blocked, never to sending for
+  real. If test mode is on but `OUTREACH_TEST_EMAIL` is unset, `testRecipient()` throws rather
+  than guessing — same fail-loud pattern as `canSpamFooter()`. **Remove after testing.**
+
+## Live Since 2026-09-22 — Testing/Building Phase Is Over
+
+Cyril confirmed go-live 2026-09-22, after a successful controlled dry run (see git history /
+memory for that session). `PAUSE_ENRICHMENT` and `PAUSE_OUTREACH` are both `false` in
+`.env.local` — the always-on scheduler enriches new leads and sends real cold outreach,
+follow-ups, and scheduling replies automatically, unattended, every 15-minute tick. There is no
+more standing per-batch confirmation gate.
+
+**What's still protecting the sending account:** `lib/outreach/rateLimiter.ts`'s warm-up ramp
+(~5/day rising to ~20/day, see that file) is unchanged and still the single choke point all
+three send paths share via `canSendOutreachEmail()`. Cyril explicitly chose to keep this on
+when he approved go-live — his stated #1 project risk is `polarisoutreach.co@gmail.com` getting
+flagged as spam or banned by Gmail. Don't raise the ramp defaults or bypass this gate without
+his explicit go-ahead, same as before.
+
+**What's still protecting recipients:** the CAN-SPAM footer (mailing address + opt-out, see
+"CAN-SPAM Compliance" above) and opt-out enforcement (`leads.opted_out`) are unconditional on
+every send regardless of live/test status — nothing about go-live touches those.
+
+If a reason ever comes up to safely dry-run the pipeline again without real sends, see
+"Simulation / Test Mode" above — those env vars are commented out in `.env.local`, ready to
+uncomment for another controlled run. Re-adding a standing `PAUSE_OUTREACH`-style gate for
+day-to-day operation would need a fresh conversation with Cyril, not just uncommenting.
 
 ## Success Metrics
 

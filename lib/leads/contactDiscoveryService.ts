@@ -43,8 +43,23 @@ const JUNK_EMAIL_PATTERNS = [
   "squarespace.com", "godaddy.com", "@2x", ".png", ".jpg", ".gif", ".svg",
 ];
 
+// Confirmed live 2026-09-22: scraped "First.Last@acora.com" from a contact
+// page's placeholder mailto: example (a common contact-form template
+// pattern) as if it were the business's real address. Sending to it would
+// bounce — a real deliverability hit for a fake mailbox, not a real one
+// belonging to someone who just doesn't check it. Local-part check, case
+// insensitive, since the placeholder pattern is what's fake regardless of
+// domain.
+const JUNK_LOCAL_PARTS = [
+  "first.last", "firstname.lastname", "john.doe", "jane.doe",
+  "your.name", "name.surname", "first.lastname", "firstname.last",
+];
+
 export function isRealEmail(email: string): boolean {
-  return !JUNK_EMAIL_PATTERNS.some((pattern) => email.includes(pattern));
+  if (JUNK_EMAIL_PATTERNS.some((pattern) => email.includes(pattern))) return false;
+  const localPart = email.split("@")[0]?.toLowerCase();
+  if (localPart && JUNK_LOCAL_PARTS.includes(localPart)) return false;
+  return true;
 }
 
 // Personal-email providers are common and legitimate for small local

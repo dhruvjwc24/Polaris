@@ -2,7 +2,16 @@ import { db } from "@/lib/db/supabase";
 import { scoreLead, isLeadEligible } from "./scoring";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
-const MAX_LEADS = 15;
+// No standing cap, per Cyril 2026-09-22 — discovery should find every
+// eligible lead a search turns up; it's the outreach send rate (see
+// lib/outreach/rateLimiter.ts) that gates how many actually get emailed per
+// day, not how many get discovered/enriched/mocked-up. Still overridable
+// for a controlled test run — see CLAUDE.md "Simulation / Test Mode".
+// An empty string (this repo's convention for "unset, see .env.local.example")
+// must also mean unlimited, not Number("") === 0, which would silently
+// discover zero leads on every run.
+const rawMaxLeads = process.env.DISCOVERY_MAX_LEADS;
+const MAX_LEADS = rawMaxLeads ? Number(rawMaxLeads) : Infinity;
 // Anything scoring below this on the combined signals — reviews, rating,
 // tenure, search prominence — isn't a strong enough prospect to spend a
 // mockup + outreach cycle on. 6 is the practical floor given the current

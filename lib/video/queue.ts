@@ -49,6 +49,13 @@ export async function isWorkerOnline(): Promise<boolean> {
 // Adds a lead's video job to the durable queue instead of generating inline.
 // Safe to call more than once for the same lead (e.g. a manual click landing
 // while the campaign pipeline already queued it) — returns the existing job.
+//
+// The check-then-insert below has a TOCTOU gap on its own (two near-
+// simultaneous calls for the same lead could both see no existing job and
+// both insert) — closed at the DB level by a partial unique index on
+// lead_id for active statuses (migration 018_video_queue_unique_lead.sql).
+// If this call loses that race, the insert fails with a unique-violation
+// (Postgres code 23505); fall back to reading whichever row actually won.
 export async function enqueueVideoJob(
   leadId: string,
   businessName: string,
@@ -61,15 +68,30 @@ export async function enqueueVideoJob(
     .in("status", ["queued", "processing"])
     .maybeSingle();
 
-  const jobId =
-    existing?.id ??
-    (
-      await db
+  let jobId = existing?.id;
+
+  if (!jobId) {
+    const { data: inserted, error: insertError } = await db
+      .from("video_generation_queue")
+      .insert({ lead_id: leadId, business_name: businessName, screenshot_paths: screenshotPaths })
+      .select("id")
+      .single();
+
+    if (insertError) {
+      if (insertError.code !== "23505") throw insertError;
+      // Lost the race — another call already inserted the active job for
+      // this lead. Read the winner instead of failing the whole request.
+      const { data: winner } = await db
         .from("video_generation_queue")
-        .insert({ lead_id: leadId, business_name: businessName, screenshot_paths: screenshotPaths })
         .select("id")
-        .single()
-    ).data?.id;
+        .eq("lead_id", leadId)
+        .in("status", ["queued", "processing"])
+        .maybeSingle();
+      jobId = winner?.id;
+    } else {
+      jobId = inserted?.id;
+    }
+  }
 
   if (!jobId) throw new Error("Failed to queue video job");
 

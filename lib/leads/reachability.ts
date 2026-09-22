@@ -42,9 +42,15 @@ export async function deleteHasWebsiteLeads(): Promise<number> {
     .not("website_url", "is", null)
     .not("status", "eq", "archived")
     .neq("source", "manual")
-    .select("id");
+    .select("id, business_name, website_url");
 
   if (error) throw new Error(`deleteHasWebsiteLeads failed: ${error.message}`);
+  if (data?.length) {
+    console.log(
+      `[reachability] deleteHasWebsiteLeads removed ${data.length}: ` +
+        data.map((l) => `"${l.business_name}" (${l.website_url})`).join(", ")
+    );
+  }
   return data?.length ?? 0;
 }
 
@@ -61,9 +67,15 @@ export async function deleteLowScoreLeads(): Promise<number> {
     .lt("priority_score", 6)
     .not("status", "eq", "archived")
     .neq("source", "manual")
-    .select("id");
+    .select("id, business_name, priority_score");
 
   if (error) throw new Error(`deleteLowScoreLeads failed: ${error.message}`);
+  if (data?.length) {
+    console.log(
+      `[reachability] deleteLowScoreLeads removed ${data.length}: ` +
+        data.map((l) => `"${l.business_name}" (score ${l.priority_score})`).join(", ")
+    );
+  }
   return data?.length ?? 0;
 }
 
@@ -85,8 +97,14 @@ export async function deleteIneligibleLeads(): Promise<number> {
     .not("status", "eq", "archived")
     .neq("source", "manual")
     .or("review_count.is.null,review_count.lte.15,rating.is.null,rating.eq.0")
-    .select("id");
+    .select("id, business_name, review_count, rating");
 
   if (error) throw new Error(`deleteIneligibleLeads failed: ${error.message}`);
+  if (data?.length) {
+    console.log(
+      `[reachability] deleteIneligibleLeads removed ${data.length}: ` +
+        data.map((l) => `"${l.business_name}" (reviews=${l.review_count ?? "null"}, rating=${l.rating ?? "null"})`).join(", ")
+    );
+  }
   return data?.length ?? 0;
 }

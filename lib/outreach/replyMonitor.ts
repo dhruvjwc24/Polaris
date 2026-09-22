@@ -5,7 +5,7 @@ import { notifyMainEmail, notifyDiscord } from "@/lib/notify";
 
 const client = new Anthropic();
 
-type ReplyIntent = "positive" | "not_interested" | "question" | "other";
+type ReplyIntent = "positive" | "not_interested" | "question" | "unsubscribe" | "other";
 
 async function classifyReply(body: string): Promise<ReplyIntent> {
   const message = await client.messages.create({
@@ -14,13 +14,13 @@ async function classifyReply(body: string): Promise<ReplyIntent> {
     messages: [
       {
         role: "user",
-        content: `Classify this email reply intent as exactly one of: positive, not_interested, question, other.\n\nReply:\n${body.slice(0, 500)}\n\nReturn only the classification word.`,
+        content: `Classify this email reply intent as exactly one of: positive, not_interested, question, unsubscribe, other. Use "unsubscribe" for any request to stop receiving emails, be removed from the list, or opt out — even if phrased politely or mixed with other text.\n\nReply:\n${body.slice(0, 500)}\n\nReturn only the classification word.`,
       },
     ],
   });
 
   const raw = message.content[0].type === "text" ? message.content[0].text.trim().toLowerCase() : "other";
-  const valid: ReplyIntent[] = ["positive", "not_interested", "question", "other"];
+  const valid: ReplyIntent[] = ["positive", "not_interested", "question", "unsubscribe", "other"];
   return valid.includes(raw as ReplyIntent) ? (raw as ReplyIntent) : "other";
 }
 
@@ -86,10 +86,21 @@ export async function checkReplies(): Promise<void> {
       continue;
     }
 
-    await db
+    const { error: updateError } = await db
       .from("leads")
-      .update({ status: intent === "positive" ? "positive" : "replied" })
+      .update({
+        status: intent === "positive" ? "positive" : intent === "unsubscribe" ? "archived" : "replied",
+        ...(intent === "unsubscribe" ? { opted_out: true } : {}),
+      })
       .eq("id", leadId);
+
+    if (updateError) {
+      // Must be loud, especially for "unsubscribe": a silent failure here
+      // means a business that explicitly asked to stop receiving email keeps
+      // getting follow-ups sent to it, with nothing anywhere indicating why.
+      console.error(`[replyMonitor] failed to update lead ${leadId} (intent=${intent}):`, updateError.message);
+      continue;
+    }
 
     // Real engagement — worth Cyril's immediate attention, not just a status change.
     if (intent === "positive" || intent === "question") {

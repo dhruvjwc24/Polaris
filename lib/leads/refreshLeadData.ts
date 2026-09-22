@@ -57,7 +57,11 @@ export async function refreshLeadData(): Promise<number> {
     };
 
     const { error } = await db.from("leads").update(update).eq("id", lead.id);
-    if (!error) refreshed++;
+    if (error) {
+      console.error(`[refreshLeadData] update failed for lead ${lead.id}:`, error.message);
+    } else {
+      refreshed++;
+    }
   }
 
   return refreshed;

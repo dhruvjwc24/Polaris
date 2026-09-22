@@ -1,6 +1,8 @@
 import { db } from "@/lib/db/supabase";
 import { getGmailClient, buildRfc2822 } from "./gmailClient";
 import { canSendOutreachEmail } from "./rateLimiter";
+import { canSpamFooter } from "./canSpamFooter";
+import { resolveSendTarget } from "./testMode";
 import type { Lead } from "@/lib/types";
 
 const SUBJECT_LINES = [
@@ -34,15 +36,24 @@ function buildBody(lead: Lead): string {
   lines.push(
     "\nHappy to add more to this — extra pages for services, financing, the areas you serve, whatever's useful. Just let me know."
   );
+  lines.push(canSpamFooter());
   return lines.join("\n");
 }
 
 export async function sendOutreach(leadId: string, force = false): Promise<void> {
   const query = db.from("leads").select("*").eq("id", leadId);
   if (!force) query.eq("status", "video_ready");
-  const { data: lead } = await query.maybeSingle();
+  const { data: lead, error: fetchError } = await query.maybeSingle();
 
+  if (fetchError) {
+    console.error(`[gmailService] failed to fetch lead ${leadId}:`, fetchError.message);
+    return;
+  }
   if (!lead?.email || !lead.cold_message) return;
+  if (lead.opted_out) {
+    console.log(`Skipping outreach to ${leadId} — opted out`);
+    return;
+  }
 
   if (!(await canSendOutreachEmail())) {
     console.log(`Outreach send-rate cap reached, skipping ${leadId} until tomorrow`);
@@ -50,14 +61,23 @@ export async function sendOutreach(leadId: string, force = false): Promise<void>
   }
 
   const gmail = getGmailClient();
-  const subject = pickSubject(lead.business_name);
   const body = buildBody(lead);
-  const raw = buildRfc2822(lead.email, subject, body);
+  const target = resolveSendTarget({
+    realEmail: lead.email,
+    businessName: lead.business_name,
+    realSubject: pickSubject(lead.business_name),
+  });
+  const raw = buildRfc2822(target.to, target.subject, body);
 
   const sent = await gmail.users.messages.send({
     userId: "me",
     requestBody: { raw },
   });
+
+  // A test-mode send is a dry run of content/delivery only — it must not
+  // touch the real lead's pipeline state. See testMode.ts's resolveSendTarget
+  // doc comment for the real incident this guards against.
+  if (target.testMode) return;
 
   const threadId = sent.data.threadId ?? null;
   const messageId = sent.data.id ?? null;
@@ -65,7 +85,7 @@ export async function sendOutreach(leadId: string, force = false): Promise<void>
   await db.from("outreach_messages").insert({
     lead_id: leadId,
     channel: "email",
-    subject,
+    subject: target.subject,
     body,
     follow_up_number: 0,
     gmail_thread_id: threadId,

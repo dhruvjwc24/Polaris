@@ -16,6 +16,15 @@ const TICK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const globalForScheduler = globalThis as unknown as { __polarisPipelineSchedulerStarted?: boolean };
 
 export function startPipelineScheduler(): void {
+  // Escape hatch for controlled test runs (e.g. simulating the pipeline via
+  // manual POST /api/pipeline calls) where an unattended 15-minute auto-tick
+  // would run stages outside the window being deliberately observed. Unset
+  // (or "false") in normal operation — the scheduler is meant to be
+  // always-on. See CLAUDE.md "Simulation / Test Mode".
+  if (process.env.DISABLE_PIPELINE_SCHEDULER === "true") {
+    console.log("Pipeline scheduler disabled (DISABLE_PIPELINE_SCHEDULER=true).");
+    return;
+  }
   if (globalForScheduler.__polarisPipelineSchedulerStarted) return;
   globalForScheduler.__polarisPipelineSchedulerStarted = true;
 

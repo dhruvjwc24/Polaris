@@ -66,6 +66,7 @@ export interface Lead {
   sms_queued: boolean;
   needs_contact_review: boolean;
   manual_outreach_only: boolean;
+  opted_out: boolean;
   status: LeadStatus;
   priority_score: number;
   created_at: string;

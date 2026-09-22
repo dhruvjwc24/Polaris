@@ -10,6 +10,18 @@ describe("isRealEmail", () => {
   it("accepts an ordinary business address", () => {
     expect(isRealEmail("owner@joespizza.com")).toBe(true);
   });
+
+  it("rejects a scraped contact-page template placeholder, case-insensitively", () => {
+    // Confirmed live 2026-09-22: scraped "First.Last@acora.com" from a
+    // contact page's mailto: example as if it were real — sending to it
+    // bounces, a real mailbox never existed there.
+    expect(isRealEmail("First.Last@acora.com")).toBe(false);
+    expect(isRealEmail("john.doe@somebusiness.com")).toBe(false);
+  });
+
+  it("does not false-positive on a real name that happens to contain a junk word", () => {
+    expect(isRealEmail("firstlast@joespizza.com")).toBe(true);
+  });
 });
 
 describe("isLikelyRelatedEmail", () => {
