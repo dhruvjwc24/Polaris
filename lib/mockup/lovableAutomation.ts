@@ -11,7 +11,7 @@ const SCREENSHOTS_DIR = path.join(process.cwd(), "playwright/screenshots");
 const SCREENSHOT_SECTIONS = ["hero", "services", "about", "social-proof", "cta"];
 
 export const lovableProvider: MockupProvider = {
-  async build(leadId, brief, businessName, _baseUrl?): Promise<MockupResult> {
+  async build(leadId, brief, _businessName, _baseUrl?): Promise<MockupResult> {
     if (!fs.existsSync(SCREENSHOTS_DIR)) {
       fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
     }

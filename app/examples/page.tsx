@@ -20,7 +20,7 @@ export default async function ExamplesPage() {
       </div>
 
       <p className="text-gray-500 text-sm mb-4">
-        Well-built reference sites to pull up live on a call or Zoom — "I can build you this too."
+        Well-built reference sites to pull up live on a call or Zoom — &quot;I can build you this too.&quot;
         Good for showing what a multi-page site can look like (nav tabs for Services, Financing,
         Service Areas, a Blog, etc.) when the mockup itself is generic.
       </p>

@@ -498,7 +498,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
     return { accent: T.terra, accentMid: T.terraMid, accentLight: T.terraLight };
   }
 
-  const { accent, accentMid, accentLight } = nicheAccent(lead.niche);
+  const { accent, accentLight } = nicheAccent(lead.niche);
 
   const mapsUrl = lead.google_maps_id
     ? `https://www.google.com/maps/place/?q=place_id:${lead.google_maps_id}`
@@ -516,9 +516,12 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
 
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      {/* This template renders one mockup page at a time (not shared across
+          the whole app via pages/_document), so a per-page font load here is
+          intentional, not an oversight. */}
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=Source+Serif+4:ital,wght@1,400&display=swap" rel="stylesheet" />
 
       <style>{`
@@ -1042,7 +1045,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
             <div style={{ maxWidth: 1200, margin: "0 auto" }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: accent, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 14 }}>Hours of operation</div>
               <h2 style={{ fontFamily: "'Bricolage Grotesque',sans-serif", fontWeight: 700, fontSize: "clamp(22px,3vw,36px)", color: T.ink, letterSpacing: "-0.02em", marginBottom: 24 }}>
-                When we're open
+                When we&apos;re open
               </h2>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "0 48px" }}>
                 {lead.business_hours.map((line, i) => {
@@ -1076,7 +1079,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                 Request a free<br />estimate today
               </h2>
               <p style={{ fontSize: 15, color: "rgba(253,246,232,0.42)", lineHeight: 1.8, marginBottom: 40, fontWeight: 400 }}>
-                Fill out the form and we'll be in touch within 24 hours — no pressure, no obligation.
+                Fill out the form and we&apos;ll be in touch within 24 hours — no pressure, no obligation.
               </p>
               {lead.phone && (
                 <a href={`tel:${lead.phone}`} style={{ display: "flex", alignItems: "center", gap: 14, textDecoration: "none", marginBottom: 16 }}>
@@ -1200,7 +1203,7 @@ export function WarmNeighborhoodTemplate(d: TemplateData) {
                   Request received!
                 </h3>
                 <p style={{ fontSize: 15, color: "rgba(253,246,232,0.45)", lineHeight: 1.75 }}>
-                  We'll be in touch within 24 hours to confirm your estimate.
+                  We&apos;ll be in touch within 24 hours to confirm your estimate.
                 </p>
               </div>
             </div>
