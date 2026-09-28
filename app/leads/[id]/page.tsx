@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db/supabase";
 import { StatusBadge } from "@/components/StatusBadge";
 import { LeadActions } from "@/components/LeadActions";
+import { safeHref } from "@/lib/safeHref";
 import type { Lead, OutreachMessage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -140,7 +141,7 @@ function Field({ label, value, link }: { label: string; value: string | null | u
     <div className="flex gap-2 text-sm mb-1">
       <span className="text-gray-500 w-28 shrink-0">{label}</span>
       {link ? (
-        <a href={value} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
+        <a href={safeHref(value)} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
           {value}
         </a>
       ) : (

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Lead } from "@/lib/types";
+import { safeHref } from "@/lib/safeHref";
 
 const DONE_STATUSES = new Set(["video_ready", "outreach_sent", "followed_up_1", "followed_up_2", "replied", "positive", "call_scheduled", "closed"]);
 
@@ -44,12 +45,12 @@ export function ColdCallQueue({ leads }: { leads: Lead[] }) {
               </div>
               <div className="flex items-center gap-3">
                 {lead.lovable_url && (
-                  <a href={lead.lovable_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs hover:underline">
+                  <a href={safeHref(lead.lovable_url)} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs hover:underline">
                     Mockup
                   </a>
                 )}
                 {lead.video_url && (
-                  <a href={lead.video_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs hover:underline">
+                  <a href={safeHref(lead.video_url)} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs hover:underline">
                     Video
                   </a>
                 )}

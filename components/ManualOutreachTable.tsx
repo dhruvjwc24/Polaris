@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Lead } from "@/lib/types";
+import { safeHref } from "@/lib/safeHref";
 
 export function ManualOutreachTable({ leads }: { leads: Lead[] }) {
   const router = useRouter();
@@ -71,12 +72,12 @@ export function ManualOutreachTable({ leads }: { leads: Lead[] }) {
             </td>
             <td className="py-2 pr-4 flex items-center gap-2">
               {lead.lovable_url && (
-                <a href={lead.lovable_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                <a href={safeHref(lead.lovable_url)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
                   Mockup
                 </a>
               )}
               {lead.video_url && (
-                <a href={lead.video_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                <a href={safeHref(lead.video_url)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
                   Video
                 </a>
               )}

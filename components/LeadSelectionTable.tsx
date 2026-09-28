@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge";
+import { safeHref } from "@/lib/safeHref";
 import type { Lead } from "@/lib/types";
 
 const ENRICHABLE = new Set(["new", "enriched"]);
@@ -173,7 +174,7 @@ function LeadActions({ lead }: { lead: Lead }) {
     <div className="flex items-center gap-3">
       {lead.lovable_url && (
         <a
-          href={lead.lovable_url}
+          href={safeHref(lead.lovable_url)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs text-blue-400 hover:underline"
