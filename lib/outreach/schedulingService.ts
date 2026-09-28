@@ -49,7 +49,7 @@ export async function sendSchedulingEmail(leadId: string): Promise<void> {
   // Dry run only in test mode — see testMode.ts's resolveSendTarget doc comment.
   if (target.testMode) return;
 
-  await db.from("outreach_messages").insert({
+  const { error: insertError } = await db.from("outreach_messages").insert({
     lead_id: leadId,
     channel: "email",
     subject: target.subject,
@@ -58,6 +58,16 @@ export async function sendSchedulingEmail(leadId: string): Promise<void> {
     gmail_thread_id: sent.data.threadId ?? null,
     gmail_message_id: sent.data.id ?? null,
   });
+  // Must be loud: the scheduling email already sent for real. A silent
+  // failure here, combined with the status update below, leaves the lead
+  // matching status="positive" again next tick and sends a duplicate
+  // scheduling email to someone who already replied with interest.
+  if (insertError) {
+    console.error(`[schedulingService] outreach_messages insert failed for lead ${leadId} (email already sent):`, insertError.message);
+  }
 
-  await db.from("leads").update({ status: "call_scheduled" }).eq("id", leadId);
+  const { error: statusError } = await db.from("leads").update({ status: "call_scheduled" }).eq("id", leadId);
+  if (statusError) {
+    console.error(`[schedulingService] status update to call_scheduled failed for lead ${leadId} (email already sent):`, statusError.message);
+  }
 }

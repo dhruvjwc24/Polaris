@@ -101,7 +101,11 @@ async function storeLeadPhotos(lead: Lead): Promise<void> {
 
   if (!urls.length) return;
 
-  await db.from("leads").update({ photo_urls: urls }).eq("id", lead.id);
+  const { error } = await db.from("leads").update({ photo_urls: urls }).eq("id", lead.id);
+  if (error) {
+    console.error(`[photos] failed to save photo_urls for lead ${lead.id}:`, error.message);
+    return;
+  }
   console.log(`[photos] stored ${urls.length} photos for "${lead.business_name}"`);
 }
 
@@ -182,7 +186,7 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<boo
       const r = results[j];
       if (!r) continue;
 
-      await db
+      const { error: updateError } = await db
         .from("leads")
         .update({
           diagnosis: r.diagnosis,
@@ -195,6 +199,15 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<boo
         })
         .eq("id", batch[j].id);
 
+      // Must be loud: a silent failure here leaves the lead stuck at status
+      // "new" forever with no visible sign why (it'll just keep getting
+      // re-enriched — and re-billed — every tick since it still matches the
+      // "new" query upstream).
+      if (updateError) {
+        console.error(`[enrich] status update to brief_ready failed for lead ${batch[j].id}:`, updateError.message);
+        continue;
+      }
+
       // Store photos to Supabase Storage after enrichment text is saved
       await storeLeadPhotos(batch[j]);
 
@@ -206,8 +219,12 @@ export async function enrichLeads(leadIds: string[], force = false): Promise<boo
         if (socials.facebook)  socialUpdate.facebook_url  = socials.facebook;
         if (socials.linkedin)  socialUpdate.linkedin_url  = socials.linkedin;
         if (Object.keys(socialUpdate).length > 0) {
-          await db.from("leads").update(socialUpdate).eq("id", batch[j].id);
-          console.log(`[socials] found ${Object.keys(socialUpdate).join(", ")} for "${batch[j].business_name}"`);
+          const { error: socialError } = await db.from("leads").update(socialUpdate).eq("id", batch[j].id);
+          if (socialError) {
+            console.error(`[socials] update failed for lead ${batch[j].id}:`, socialError.message);
+          } else {
+            console.log(`[socials] found ${Object.keys(socialUpdate).join(", ")} for "${batch[j].business_name}"`);
+          }
         }
       }
 

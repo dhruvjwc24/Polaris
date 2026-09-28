@@ -344,7 +344,13 @@ export async function discoverContacts(leadIds: string[]): Promise<void> {
     if (shouldReview !== lead.needs_contact_review) update.needs_contact_review = shouldReview;
 
     if (Object.keys(update).length) {
-      await db.from("leads").update(update).eq("id", lead.id);
+      const { error: updateError } = await db.from("leads").update(update).eq("id", lead.id);
+      // Must be loud: a silent failure here loses newly-found contact info
+      // (or an opt-out-relevant needs_contact_review flip) with no trace —
+      // the lead just looks like the re-search found nothing.
+      if (updateError) {
+        console.error(`[contactDiscovery] update failed for lead ${lead.id}:`, updateError.message);
+      }
     }
   }
 }

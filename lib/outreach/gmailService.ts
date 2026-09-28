@@ -82,7 +82,7 @@ export async function sendOutreach(leadId: string, force = false): Promise<void>
   const threadId = sent.data.threadId ?? null;
   const messageId = sent.data.id ?? null;
 
-  await db.from("outreach_messages").insert({
+  const { error: insertError } = await db.from("outreach_messages").insert({
     lead_id: leadId,
     channel: "email",
     subject: target.subject,
@@ -92,8 +92,24 @@ export async function sendOutreach(leadId: string, force = false): Promise<void>
     gmail_message_id: messageId,
   });
 
-  await db
+  // Must be loud: the email already went out for real. A silently-lost insert
+  // here loses the gmail_thread_id follow-ups need to reply in-thread, and
+  // (combined with the status update below) leaves the lead eligible to be
+  // picked up and emailed again next tick, sending a duplicate cold email to
+  // the same real business.
+  if (insertError) {
+    console.error(`[gmailService] outreach_messages insert failed for lead ${leadId} (email already sent):`, insertError.message);
+  }
+
+  const { error: updateError } = await db
     .from("leads")
     .update({ status: "outreach_sent" })
     .eq("id", leadId);
+
+  // Same reasoning: if this silently fails, the lead stays at "video_ready"
+  // and pipelineRunner's outreach stage will match it again next tick,
+  // sending a second real cold email to the same business.
+  if (updateError) {
+    console.error(`[gmailService] status update to outreach_sent failed for lead ${leadId} (email already sent):`, updateError.message);
+  }
 }

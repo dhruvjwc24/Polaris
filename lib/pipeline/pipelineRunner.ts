@@ -200,7 +200,8 @@ export async function runPipeline(campaignId?: string, baseUrl?: string): Promis
   //    the daily cap alone still allowed every eligible lead to send
   //    back-to-back within a single tick — a burst pattern that's a spam
   //    signal independent of the daily total. One per 15-minute tick spreads
-  //    sends across the day instead (5/day takes ≥75min, 20/day takes ≥5hr).
+  //    sends across the day instead (5/day takes ≥75min, 10/day — the hard
+  //    ceiling, see lib/outreach/rateLimiter.ts — takes ≥2.5hr).
   const outreachQuery = db
     .from("leads")
     .select("id")

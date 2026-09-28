@@ -101,7 +101,7 @@ export async function processFollowUps(): Promise<void> {
         // Dry run only in test mode — see testMode.ts's resolveSendTarget doc comment.
         if (target.testMode) continue;
 
-        await db.from("outreach_messages").insert({
+        const { error: insertError } = await db.from("outreach_messages").insert({
           lead_id: lead.id,
           channel: "email",
           subject: target.subject,
@@ -110,8 +110,20 @@ export async function processFollowUps(): Promise<void> {
           gmail_thread_id: sent.data.threadId ?? null,
           gmail_message_id: sent.data.id ?? null,
         });
+        // Must be loud: the follow-up already sent for real. A lost insert
+        // here loses the thread id the *next* follow-up needs to reply
+        // in-thread, and (with the status update below) leaves the lead
+        // eligible to match this same query again next tick.
+        if (insertError) {
+          console.error(`[followUps] outreach_messages insert failed for lead ${lead.id} (email already sent):`, insertError.message);
+        }
 
-        await db.from("leads").update({ status: config.nextStatus }).eq("id", lead.id);
+        const { error: statusError } = await db.from("leads").update({ status: config.nextStatus }).eq("id", lead.id);
+        // Same reasoning: a silent failure here leaves the lead matching this
+        // same status/cutoff query next tick, sending a duplicate follow-up.
+        if (statusError) {
+          console.error(`[followUps] status update to ${config.nextStatus} failed for lead ${lead.id} (email already sent):`, statusError.message);
+        }
       } catch (err) {
         // One lead's Gmail API failure (revoked thread, transient error, etc.)
         // must not abort the rest of this batch — each lead is independent.
