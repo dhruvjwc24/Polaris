@@ -35,7 +35,15 @@ export async function POST(req: Request) {
       .select("id")
       .eq("campaign_id", campaign.id)
       .eq("status", "new")
-      .then(async ({ data }) => {
+      .then(async ({ data, error: selectError }) => {
+        // Must be loud: a silent failure here (e.g. a transient DB error)
+        // would look identical to "nothing new to process" and quietly skip
+        // contact discovery + enrichment for a whole campaign's leads, with
+        // nothing anywhere indicating why they're stuck at status "new".
+        if (selectError) {
+          console.error(`[campaigns] failed to fetch new leads for campaign ${campaign.id}:`, selectError.message);
+          return;
+        }
         if (!data?.length) return;
         const ids = data.map((l) => l.id);
         await discoverContacts(ids).catch(console.error);

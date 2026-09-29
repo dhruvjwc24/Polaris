@@ -4,14 +4,21 @@ import { db } from "@/lib/db/supabase";
 import { getGmailClient, buildRfc2822 } from "@/lib/outreach/gmailClient";
 import { notifyMainEmail } from "@/lib/notify";
 
+// This is the one genuinely public, unauthenticated endpoint in the app —
+// the mockup site's estimate form is meant to be filled out by a real
+// prospect's own browser, with no login involved anywhere in Polaris. Was
+// z.string().min(1)/optional() with no format or length checks at all, so
+// it accepted a non-email string as "email" and had no cap on how large a
+// submission could be (stored as-is, and echoed into the notification
+// email body below). Tightened to match what the fields actually are.
 const Body = z.object({
-  name: z.string().min(1),
-  email: z.string().min(1),
-  phone: z.string().optional().nullable(),
-  zip: z.string().optional().nullable(),
-  address: z.string().optional().nullable(),
-  heardAbout: z.string().optional().nullable(),
-  serviceNeeded: z.string().optional().nullable(),
+  name: z.string().min(1).max(200),
+  email: z.string().email().max(320),
+  phone: z.string().max(40).optional().nullable(),
+  zip: z.string().max(20).optional().nullable(),
+  address: z.string().max(500).optional().nullable(),
+  heardAbout: z.string().max(200).optional().nullable(),
+  serviceNeeded: z.string().max(500).optional().nullable(),
   smsInfoConsent: z.boolean().optional().default(false),
   smsPromoConsent: z.boolean().optional().default(false),
 });

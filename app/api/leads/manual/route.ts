@@ -9,16 +9,38 @@ const ReviewSnippet = z.object({
   time_desc: z.string().optional().default(""),
 });
 
+// Was z.string().optional() for every one of these — accepted literally any
+// string, including a javascript: URI, as a website/social link. The render
+// side is now guarded too (safeHref() in app/leads/[id]/page.tsx and
+// elsewhere), but this is the actual entry point for freeform manual-lead
+// input, so validate it here as well — same http(s)-only rule
+// app/api/examples/route.ts already uses for the same reason, and the same
+// z.string().url() shape lib/leads/importService.ts already requires for
+// CSV-imported leads (this manual-entry form was the one path that skipped it).
+const httpUrl = z
+  .string()
+  .url()
+  .refine(
+    (u) => {
+      try {
+        return ["http:", "https:"].includes(new URL(u).protocol);
+      } catch {
+        return false;
+      }
+    },
+    { message: "URL must be http or https" }
+  );
+
 const Body = z.object({
   businessName: z.string().min(1),
   niche: z.string().min(1),
   city: z.string().min(1),
   phone: z.string().optional(),
-  email: z.string().optional(),
-  websiteUrl: z.string().optional(),
-  facebookUrl: z.string().optional(),
-  instagramUrl: z.string().optional(),
-  linkedinUrl: z.string().optional(),
+  email: z.string().email().optional(),
+  websiteUrl: httpUrl.optional(),
+  facebookUrl: httpUrl.optional(),
+  instagramUrl: httpUrl.optional(),
+  linkedinUrl: httpUrl.optional(),
   location: z.string().optional(),
   googleMapsId: z.string().optional(),
   rating: z.number().optional(),
