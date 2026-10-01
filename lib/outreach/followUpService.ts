@@ -4,6 +4,7 @@ import { getGmailClient, buildRfc2822 } from "./gmailClient";
 import { canSendOutreachEmail } from "./rateLimiter";
 import { canSpamFooter } from "./canSpamFooter";
 import { resolveSendTarget } from "./testMode";
+import { COPY_STYLE_RULES, EMAIL_ADD_MORE, EMAIL_CLOSE, stripDashes } from "./copyStyle";
 import type { Lead } from "@/lib/types";
 
 const client = new Anthropic();
@@ -16,8 +17,8 @@ const FOLLOW_UP_CONFIG = [
 async function generateFollowUp(lead: Lead, angle: "gap" | "competitor"): Promise<string> {
   const prompt =
     angle === "gap"
-      ? `Write a follow-up email for ${lead.business_name} in ${lead.city} (${lead.niche}). Under 50 words. Reference a specific gap in their current online presence: ${lead.gap_analysis ?? "no visible website"}. Same tone as original outreach. No AI mentions.`
-      : `Write a follow-up email for ${lead.business_name} in ${lead.city} (${lead.niche}). Under 50 words. Reference what a competitor is likely doing better online. Specific, not generic. No AI mentions.`;
+      ? `Write a short follow-up email body for ${lead.business_name} in ${lead.city} (${lead.niche}). Under 40 words. Gently mention a specific gap in their current online presence: ${lead.gap_analysis ?? "no visible website"}. ${COPY_STYLE_RULES}`
+      : `Write a short follow-up email body for ${lead.business_name} in ${lead.city} (${lead.niche}). Under 40 words. Gently mention what a competitor is likely doing better online. Specific, not generic. ${COPY_STYLE_RULES}`;
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
@@ -81,7 +82,8 @@ export async function processFollowUps(): Promise<void> {
         if (!body || !lead.email) continue;
         // Same static, non-AI-generated offer as the initial email — see
         // gmailService.ts for why it's worded with concrete examples.
-        body += "\n\nHappy to add more to this — extra pages for services, financing, the areas you serve, whatever's useful. Just let me know.";
+        body = stripDashes(body);
+        body += `\n\n${EMAIL_ADD_MORE}\n\n${EMAIL_CLOSE}`;
         body += canSpamFooter();
 
         const originalMessage = lead.outreach_messages?.[0];

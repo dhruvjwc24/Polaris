@@ -66,11 +66,20 @@ export async function checkReplies(): Promise<void> {
     }
     const messages = thread.data.messages ?? [];
 
-    // A reply exists if there's more than 1 message in the thread
-    if (messages.length <= 1) continue;
+    // A real reply is a message NOT sent by us and NOT a bounce/system notice.
+    // (Found 2026-09-30: counting "more than 1 message" treated our own
+    // follow-ups and Gmail's delivery-failure notices as replies, which would
+    // now trigger an automatic website build for a lead that never answered.)
+    const isRealReply = (m: (typeof messages)[number]) => {
+      if (m.labelIds?.includes("SENT")) return false;
+      const from = m.payload?.headers?.find((h) => h.name?.toLowerCase() === "from")?.value?.toLowerCase() ?? "";
+      return !/mailer-daemon|postmaster|no-?reply|delivery subsystem/.test(from);
+    };
+    const realReplies = messages.filter(isRealReply);
+    if (!realReplies.length) continue;
 
-    // Get the latest reply body
-    const lastMsg = messages[messages.length - 1];
+    // Get the latest real reply body
+    const lastMsg = realReplies[realReplies.length - 1];
     const bodyPart = lastMsg.payload?.parts?.find((p) => p.mimeType === "text/plain")
       ?? lastMsg.payload;
     const bodyData = bodyPart?.body?.data ?? "";

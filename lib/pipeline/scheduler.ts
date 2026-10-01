@@ -1,6 +1,13 @@
-import { runPipeline } from "@/lib/pipeline/pipelineRunner";
+import { runPipeline, sendNextOutreach } from "@/lib/pipeline/pipelineRunner";
+import { processReplyFlow } from "@/lib/pipeline/replyFlow";
+import { processMeetingReminders } from "@/lib/pipeline/meetingFlow";
 
 const TICK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+// Replies, builds, scheduling and meeting reminders run on their own loop
+// (Cyril, 2026-09-30: every 15 minutes is enough).
+const REPLY_LOOP_INTERVAL_MS = 15 * 60 * 1000;
+const OUTREACH_MIN_GAP_MS = 3 * 60 * 1000;
+const OUTREACH_MAX_GAP_MS = 8 * 60 * 1000;
 
 // runPipeline() (contact discovery -> enrichment -> mockups -> video queueing
 // -> outreach send -> follow-ups -> reply-checking -> scheduling emails) used
@@ -30,10 +37,60 @@ export function startPipelineScheduler(): void {
 
   let busy = false;
 
+  // Cold outreach runs on its own jittered timer instead of the fixed tick:
+  // a random 3-8 minute gap between sends (Cyril, 2026-09-30) so the sending
+  // pattern isn't a metronome. sendNextOutreach still goes through the
+  // shared PAUSE_OUTREACH + daily-cap gate, so this can never exceed 10/day.
+  let outreachBusy = false;
+  const scheduleNextOutreach = () => {
+    const delayMs = OUTREACH_MIN_GAP_MS + Math.random() * (OUTREACH_MAX_GAP_MS - OUTREACH_MIN_GAP_MS);
+    console.log(`Next outreach send check in ${(delayMs / 60000).toFixed(1)} min.`);
+    setTimeout(async () => {
+      if (!outreachBusy) {
+        outreachBusy = true;
+        try {
+          await sendNextOutreach();
+        } catch (err) {
+          console.error("Jittered outreach send failed:", err);
+        } finally {
+          outreachBusy = false;
+        }
+      }
+      scheduleNextOutreach();
+    }, delayMs);
+  };
+  scheduleNextOutreach();
+
+  let replyBusy = false;
+  const runReplyLoop = () => {
+    if (replyBusy) return;
+    replyBusy = true;
+    processReplyFlow()
+      .catch((err) => console.error("Reply loop failed:", err))
+      .finally(() => {
+        replyBusy = false;
+      });
+  };
+  setInterval(runReplyLoop, REPLY_LOOP_INTERVAL_MS);
+  setTimeout(runReplyLoop, 60 * 1000);
+
+  // Meeting reminders (Discord at ~70 min, lead email at ~1 hr) are a cheap DB
+  // check, so they run every minute instead of waiting on the 15-minute loop.
+  let reminderBusy = false;
+  setInterval(() => {
+    if (reminderBusy) return;
+    reminderBusy = true;
+    processMeetingReminders()
+      .catch((err) => console.error("Meeting reminder loop failed:", err))
+      .finally(() => {
+        reminderBusy = false;
+      });
+  }, 60 * 1000);
+
   setInterval(() => {
     if (busy) return;
     busy = true;
-    runPipeline()
+    runPipeline(undefined, undefined, { skipOutreach: true })
       .then(() => console.log("Pipeline scheduler tick complete."))
       .catch((err) => console.error("Pipeline scheduler tick failed:", err))
       .finally(() => {

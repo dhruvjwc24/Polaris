@@ -3,12 +3,15 @@ import { getGmailClient, buildRfc2822 } from "./gmailClient";
 import { canSendOutreachEmail } from "./rateLimiter";
 import { canSpamFooter } from "./canSpamFooter";
 import { resolveSendTarget } from "./testMode";
+import { EMAIL_INTRO, EMAIL_OFFER, EMAIL_ADD_MORE, EMAIL_CLOSE, EMAIL_VIDEO_NOTE, EMAIL_LEGIT, stripDashes } from "./copyStyle";
+import { buildColdObservation } from "./coldTemplate";
 import type { Lead } from "@/lib/types";
 
+// Subjects must stay truthful: nothing has been built when this goes out.
 const SUBJECT_LINES = [
-  "Built something for {name}",
-  "Quick mockup for {name}",
-  "Saw your reviews, made you something",
+  "A website for {name}",
+  "Quick idea for {name}",
+  "Saw {name} online",
 ];
 
 function pickSubject(businessName: string): string {
@@ -16,40 +19,46 @@ function pickSubject(businessName: string): string {
   return template.replace("{name}", businessName);
 }
 
-function buildBody(lead: Lead): string {
-  const lines = [lead.cold_message ?? ""];
-  // One link only (2026-09-22, deliverability research) — and it has to be
-  // the video, not the mockup: lovable_url currently resolves to
-  // localhost:3000 (Polaris isn't deployed anywhere public), so it's only
-  // ever usable by Cyril himself sharing his own screen on a call. The video
-  // is hosted on Supabase storage — a real public URL — so it's the only
-  // link that actually works for the recipient. Do not swap this back to
-  // lovable_url until Polaris is deployed publicly.
-  if (lead.video_url) lines.push(`\n10-second walkthrough: ${lead.video_url}`);
-  // Static, not AI-generated, so it's guaranteed to be in every send — since
-  // these are now built from a generic template (no-website leads only,
-  // 2026-09-21 pivot), we can't know what each business specifically wants
-  // added, so we offer to add it instead. Names concrete examples (pages a
-  // competitor site, woodbridgeroofers.com, actually had) rather than a
-  // vague "anything," per Cyril 2026-09-22 — specific reads as credible,
-  // vague reads as a throwaway line.
-  lines.push(
-    "\nHappy to add more to this — extra pages for services, financing, the areas you serve, whatever's useful. Just let me know."
-  );
+// Plain text, no links (Cyril, 2026-09-30, backed by cold-email deliverability
+// research: first-touch links from a new shared-Gmail sender hurt inbox
+// placement). The website and video are only built after the lead replies;
+// see lib/pipeline/replyFlow.ts.
+export function buildBody(lead: Lead): string {
+  const observation =
+    lead.source === "manual" && lead.cold_message
+      ? stripDashes(lead.cold_message)
+      : buildColdObservation(lead);
+  const lines = [
+    EMAIL_INTRO,
+    "",
+    observation,
+    "",
+    `${EMAIL_OFFER} ${EMAIL_ADD_MORE}`,
+    "",
+    EMAIL_CLOSE,
+    "",
+    EMAIL_VIDEO_NOTE,
+    "",
+    EMAIL_LEGIT,
+  ];
   lines.push(canSpamFooter());
   return lines.join("\n");
 }
 
+// Any not-yet-contacted lead state may be sent; the reply flow (replyFlow.ts)
+// handles everything after a lead has been emailed.
+export const OUTREACH_STATUSES = ["enriched", "brief_ready", "mockup_building", "mockup_ready", "video_building", "video_ready"];
+
 export async function sendOutreach(leadId: string, force = false): Promise<void> {
   const query = db.from("leads").select("*").eq("id", leadId);
-  if (!force) query.eq("status", "video_ready");
+  if (!force) query.in("status", OUTREACH_STATUSES);
   const { data: lead, error: fetchError } = await query.maybeSingle();
 
   if (fetchError) {
     console.error(`[gmailService] failed to fetch lead ${leadId}:`, fetchError.message);
     return;
   }
-  if (!lead?.email || !lead.cold_message) return;
+  if (!lead?.email) return;
   if (lead.opted_out) {
     console.log(`Skipping outreach to ${leadId} — opted out`);
     return;

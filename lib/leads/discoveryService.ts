@@ -18,7 +18,7 @@ const MAX_LEADS = rawMaxLeads ? Number(rawMaxLeads) : Infinity;
 // rubric: isLeadEligible's hard cutoffs (review_count, rating, tenure) mean
 // nothing can score below 5, and 5 itself is deliberately excluded too — see
 // CLAUDE.md "Targeting: No-Website Leads Only".
-const MIN_PRIORITY_SCORE = 6;
+const MIN_PRIORITY_SCORE = 6; // tried 5 on 2026-09-30, moved back: a 5 is too easy to hit to be a real signal
 
 interface PlacePhoto {
   photo_reference: string;

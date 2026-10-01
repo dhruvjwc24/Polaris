@@ -15,5 +15,5 @@ export function canSpamFooter(): string {
       "OUTREACH_MAILING_ADDRESS is not set — required by CAN-SPAM on every outbound email. Set it in .env.local before sending."
     );
   }
-  return `\n\n---\n${address}\nDon't want these emails? Just reply "unsubscribe" and I'll take you off the list right away.`;
+  return `\n\n${address}\nDon't want these emails? Just reply "unsubscribe" and I'll take you off the list right away.`;
 }

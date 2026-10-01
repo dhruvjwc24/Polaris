@@ -12,6 +12,7 @@
     "manual-pile:status": "node scripts/manual-pile-status.mjs",
     "gmail:check": "node scripts/gmail-token-check.mjs",
     "gmail:reauth": "node scripts/get-gmail-token.js",
+    "calendar:auth": "node scripts/get-calendar-token.js",
     "test": "vitest run"
   },
   "dependencies": {

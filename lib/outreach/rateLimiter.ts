@@ -87,8 +87,12 @@ export async function getRemainingSendBudget(): Promise<number> {
 // gate) — a redirected test send can't hit the real rate budget or
 // PAUSE_OUTREACH's protection because it was never going to reach a real
 // business in the first place.
-export async function canSendOutreachEmail(): Promise<boolean> {
+export async function canSendOutreachEmail(opts?: { isReply?: boolean }): Promise<boolean> {
   if (isTestMode()) return true;
   if (process.env.PAUSE_OUTREACH === "true") return false;
+  // A reply to someone who already wrote to us is a conversation, not cold
+  // volume: it still honors PAUSE_OUTREACH but isn't blocked by the daily
+  // cold-send budget (2026-09-30), so an interested lead is never left waiting.
+  if (opts?.isReply) return true;
   return (await getRemainingSendBudget()) > 0;
 }

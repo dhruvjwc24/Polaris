@@ -43,7 +43,7 @@ function buildPrompt(leads: Lead[]): string {
 - "outreach_angle": one specific hook I can use based on what I see
 - "gap_analysis": the specific gap a new website would close
 - "site_brief": 100-word max, hero angle, key services to highlight, tone, CTA, one design differentiator
-- "cold_message": under 70 words, opens with a specific observation about THIS business, references their service or location, ends with soft ask to see a mockup. No corporate language, no AI mentions.
+- "cold_message": 2 short sentences, under 45 words total. This is the MIDDLE of an email whose intro and Zoom/Meet invitation are added separately, so do NOT greet, introduce yourself, sign off, or ask for a meeting. Give one genuine, specific observation about THIS business (their service, location, or reviews) and say you noticed they don't have a website yet. Write like a friendly real person, casual and conversational. Never use em dashes or en dashes. No corporate language, no AI mentions, no exclamation marks.
 - "site_structure": object with exactly these fields:
   - "headline": compelling 6-10 word hero headline for their website (specific to their business and city)
   - "tagline": supporting sub-headline, 10-15 words
