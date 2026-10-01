@@ -3,7 +3,7 @@ import { getGmailClient, buildRfc2822 } from "./gmailClient";
 import { canSendOutreachEmail } from "./rateLimiter";
 import { canSpamFooter } from "./canSpamFooter";
 import { resolveSendTarget } from "./testMode";
-import { EMAIL_INTRO, EMAIL_OFFER, EMAIL_ADD_MORE, EMAIL_CLOSE, EMAIL_VIDEO_NOTE, EMAIL_LEGIT, stripDashes } from "./copyStyle";
+import { EMAIL_INTRO, EMAIL_OFFER, EMAIL_ADD_MORE, EMAIL_CLOSE, EMAIL_LEGIT, stripDashes } from "./copyStyle";
 import { buildColdObservation } from "./coldTemplate";
 import type { Lead } from "@/lib/types";
 
@@ -36,8 +36,6 @@ export function buildBody(lead: Lead): string {
     `${EMAIL_OFFER} ${EMAIL_ADD_MORE}`,
     "",
     EMAIL_CLOSE,
-    "",
-    EMAIL_VIDEO_NOTE,
     "",
     EMAIL_LEGIT,
   ];

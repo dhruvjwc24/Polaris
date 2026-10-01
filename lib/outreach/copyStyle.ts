@@ -23,9 +23,6 @@ export const EMAIL_ADD_MORE =
 export const EMAIL_CLOSE =
   "If you're interested, please let me know and send a date and time that works best for you. That way I can schedule it and we can hop on a Zoom call so I can show you the website and tell you more. Feel free to ask anything you'd like.";
 
-export const EMAIL_VIDEO_NOTE =
-  "Also, when you respond to this I can send you a video of the website as well. We'll still hop on the Zoom meeting to go over any questions you have and the specifics you want for the website.";
-
 export const EMAIL_LEGIT =
   "And if you're worried this might be a scam, I understand. I'm just a college student trying to build a business on my own. I'm happy to send you my LinkedIn or social media, whatever works best for you, so you can see that I'm legit.";
 
