@@ -21,7 +21,9 @@ async function generateFollowUp(lead: Lead, angle: "gap" | "competitor"): Promis
       : `Write a short follow-up email body for ${lead.business_name} in ${lead.city} (${lead.niche}). Under 40 words. Gently mention what a competitor is likely doing better online. Specific, not generic. ${COPY_STYLE_RULES}`;
 
   const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
+    // Haiku, not Sonnet (Cyril, 2026-10-02): ~70% cheaper for a 40-word email.
+    // If the wording ever reads worse, this is the one line to revert.
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 256,
     messages: [{ role: "user", content: prompt }],
   });
