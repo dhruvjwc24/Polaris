@@ -26,14 +26,29 @@ export function hasWebsiteCached(placeId: string): boolean {
   return typeof t === "number" && Date.now() - t < TTL_MS;
 }
 
-export function markHasWebsite(placeId: string): void {
+function mark(key: string): void {
   const m = load();
   const now = Date.now();
   for (const k of Object.keys(m)) if (now - m[k] >= TTL_MS) delete m[k];
-  m[placeId] = now;
+  m[key] = now;
   try {
     fs.writeFileSync(SEEN_FILE, JSON.stringify(m));
   } catch {
     // Cache only; failing to write just means a repeat check later.
   }
+}
+
+export function markHasWebsite(placeId: string): void {
+  mark(placeId);
+}
+
+// A no-website business we searched for an email and could not find one for.
+// Cached under a prefixed key so discovery never re-pays for it (Google light
+// Details + a web search) for 60 days.
+export function noEmailCached(placeId: string): boolean {
+  return hasWebsiteCached(`noemail:${placeId}`);
+}
+
+export function markNoEmail(placeId: string): void {
+  mark(`noemail:${placeId}`);
 }

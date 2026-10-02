@@ -1,7 +1,9 @@
 import { db } from "@/lib/db/supabase";
 import { scoreLead, isLeadEligible } from "./scoring";
 import { placesFetch, PlacesBudgetExceeded } from "./placesBudget";
-import { hasWebsiteCached, markHasWebsite } from "./placesSeen";
+import { hasWebsiteCached, markHasWebsite, noEmailCached, markNoEmail } from "./placesSeen";
+import { findEmailForBusiness } from "./contactDiscoveryService";
+import { isSendableLead } from "@/lib/pipeline/qualification";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 // Default cap of 15 leads per discovery run (was unlimited 2026-09-22 until
@@ -169,7 +171,16 @@ export async function discoverLeads(
   const key = process.env.GOOGLE_PLACES_API_KEY;
   let inserted = 0;
   // Per-run funnel, logged at the end, so search tuning is measured not guessed.
-  const funnel = { candidates: 0, passedPrefilter: 0, cachedHasWebsite: 0, lightChecked: 0, noWebsite: 0 };
+  const funnel = {
+    candidates: 0,
+    passedPrefilter: 0,
+    cachedHasWebsite: 0,
+    cachedNoEmail: 0,
+    lightChecked: 0,
+    noWebsite: 0,
+    emailSearched: 0,
+    emailFound: 0,
+  };
 
   try {
   for (const city of cities) {
@@ -214,6 +225,10 @@ export async function discoverLeads(
         funnel.cachedHasWebsite++;
         continue;
       }
+      if (noEmailCached(candidate.place_id)) {
+        funnel.cachedNoEmail++;
+        continue;
+      }
 
       // Cheap call first: website + phone only.
       const light = await getPlaceDetails(candidate.place_id, "light");
@@ -232,6 +247,20 @@ export async function discoverLeads(
       }
 
       funnel.noWebsite++;
+
+      // Email-first (Cyril, 2026-10-02): only ~24% of no-website leads ever
+      // had a findable email and a lead with no email is deleted later
+      // anyway, so find the email BEFORE paying for the full record and
+      // before inserting. Free web-search quota (capped in searchBudget.ts).
+      const bizName = light.name ?? candidate.name;
+      const foundEmail = await findEmailForBusiness(bizName, city);
+      funnel.emailSearched++;
+      if (!foundEmail || !isSendableLead({ business_name: bizName, email: foundEmail })) {
+        markNoEmail(candidate.place_id);
+        continue;
+      }
+      funnel.emailFound++;
+
       // Only now pay for the full record (reviews, hours, photos).
       const detail = await getPlaceDetails(candidate.place_id, "full");
       if (!detail) continue;
@@ -245,6 +274,7 @@ export async function discoverLeads(
         business_name: detail.name,
         website_url: websiteUrl,
         phone: detail.formatted_phone_number ?? null,
+        email: foundEmail,
         location: detail.formatted_address,
         city,
         niche,

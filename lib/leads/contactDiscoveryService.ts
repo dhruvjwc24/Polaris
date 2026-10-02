@@ -19,6 +19,7 @@
  */
 
 import { db } from "@/lib/db/supabase";
+import { reserveWebSearch } from "./searchBudget";
 
 // Supports Tavily (free, 1k/month), Brave ($5/month), or Bing ($, needs card).
 // Set whichever key you have — Tavily is checked first.
@@ -146,6 +147,8 @@ async function scrapeWebsite(url: string): Promise<ScrapedContacts> {
 // Brave:  $5/month at api.search.brave.com — fallback if you prefer it.
 
 async function webSearch(query: string): Promise<string[]> {
+  // Monthly cap (lib/leads/searchBudget.ts) so Tavily's free tier is never exceeded.
+  if ((TAVILY_API_KEY || BRAVE_API_KEY) && !reserveWebSearch()) return [];
   if (TAVILY_API_KEY) {
     try {
       const res = await fetch("https://api.tavily.com/search", {
@@ -205,6 +208,12 @@ async function findEmailViaSearch(
     if (match) return match;
   }
   return null;
+}
+
+// Used by discovery to check a business can be emailed BEFORE paying for its
+// full Google record or inserting it as a lead (see discoveryService.ts).
+export async function findEmailForBusiness(businessName: string, city: string): Promise<string | null> {
+  return findEmailViaSearch(businessName, city);
 }
 
 async function findSocialViaSearch(

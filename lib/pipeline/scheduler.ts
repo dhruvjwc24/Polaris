@@ -3,9 +3,15 @@ import { processReplyFlow } from "@/lib/pipeline/replyFlow";
 import { processMeetingReminders } from "@/lib/pipeline/meetingFlow";
 
 const TICK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-// Replies, builds, scheduling and meeting reminders run on their own loop
-// (Cyril, 2026-09-30: every 15 minutes is enough).
-const REPLY_LOOP_INTERVAL_MS = 15 * 60 * 1000;
+// Replies, builds and scheduling replies run on their own loop. Was every 15
+// minutes; changed 2026-10-02 (Cyril) to once when the server starts plus once
+// per REPLY_CHECK_MINUTES (default 1440 = daily), since he sees the reply in
+// his own inbox too. The loop costs ~$0 (Gmail API is free; Claude Haiku runs
+// only when a real reply exists), so this is about convenience, not money.
+// Set REPLY_CHECK_MINUTES=15 to restore near-real-time checks. The 1-minute
+// meeting-reminder loop below is separate and unchanged.
+const replyMinutesRaw = Number(process.env.REPLY_CHECK_MINUTES ?? 1440);
+const REPLY_LOOP_INTERVAL_MS = (Number.isFinite(replyMinutesRaw) && replyMinutesRaw >= 1 ? replyMinutesRaw : 1440) * 60 * 1000;
 const OUTREACH_MIN_GAP_MS = 3 * 60 * 1000;
 const OUTREACH_MAX_GAP_MS = 8 * 60 * 1000;
 

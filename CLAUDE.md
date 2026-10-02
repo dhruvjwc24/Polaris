@@ -668,3 +668,10 @@ A $34.10 Google Cloud bill for September (almost all Places API, mostly on 2026-
   Text Search is OFF (`DISCOVERY_PAGES=2` to enable) pending the per-run funnel log (`[discovery] ... funnel`).
 - Only ~24% of Places-found leads ended up with an email (Brave/Tavily search), so email-find rate, not Places
   cost per call, is the main efficiency lever. Early data: handyman/painting/garage door niches 0 emails.
+
+**Added 2026-10-02:** discovery is email-first (find a sendable email via web search BEFORE the full Places Details
+call and before inserting a lead; no-email businesses are cached 60 days in `.places-seen.json`). Web-search
+queries (Tavily/Brave) are capped by `lib/leads/searchBudget.ts` (`WEB_SEARCH_MONTHLY_LIMIT`, default 900 of
+Tavily's free 1,000). The reply/meeting loop runs once at server start then every `REPLY_CHECK_MINUTES` (default
+1440); it costs ~$0 either way. Biggest non-Google cost is follow-up emails on Claude Sonnet (~$3/month at 10
+sends/day).
