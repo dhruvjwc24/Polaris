@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db/supabase";
 import type { Lead } from "@/lib/types";
+import { placesFetch } from "@/lib/leads/placesBudget";
 
 const client = new Anthropic();
 const BUCKET = "pictures";
@@ -63,7 +64,7 @@ async function uploadPhoto(ref: string, leadId: string, index: number): Promise<
   try {
     const key = process.env.GOOGLE_PLACES_API_KEY;
     const url = `${PLACES_PHOTO_BASE}?maxwidth=1200&photoreference=${ref}&key=${key}`;
-    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(10000) });
+    const res = await placesFetch("photo", url, { redirect: "follow", signal: AbortSignal.timeout(10000) });
     if (!res.ok) return null;
 
     const buffer = await res.arrayBuffer();
@@ -93,7 +94,9 @@ async function storeLeadPhotos(lead: Lead): Promise<void> {
   if (!lead.photo_refs?.length) return;
 
   const urls: string[] = [];
-  const maxPhotos = Math.min(lead.photo_refs.length, 10);
+  // 5, not 10: the mockup only shows a hero + 5 gallery photos, and each photo
+  // fetch is billed (~$0.004). Cap lowered 2026-10-01 after a $34 Google bill.
+  const maxPhotos = Math.min(lead.photo_refs.length, 5);
   for (let i = 0; i < maxPhotos; i++) {
     const url = await uploadPhoto(lead.photo_refs[i], lead.id, i);
     if (url) urls.push(url);

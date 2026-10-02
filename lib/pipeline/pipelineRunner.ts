@@ -5,7 +5,6 @@ import {
   deleteLowScoreLeads,
   deleteIneligibleLeads,
 } from "@/lib/leads/reachability";
-import { refreshLeadData } from "@/lib/leads/refreshLeadData";
 import { discoverContacts } from "@/lib/leads/contactDiscoveryService";
 import { enrichLeads } from "@/lib/leads/enrichmentService";
 import { templateProvider } from "@/lib/mockup/templateMockup";
@@ -34,13 +33,12 @@ export async function runPipeline(
   // than enrichment and shouldn't silently stop firing every 15 minutes just
   // because an earlier, unrelated stage broke.
 
-  // 0a. Refresh review_count/rating/website_url from live Places data before
-  //     any filtering decisions run off them — see lib/leads/refreshLeadData.ts.
-  try {
-    await refreshLeadData();
-  } catch (err) {
-    console.error("Stage failed: refreshLeadData:", err);
-  }
+  // 0a. (Removed 2026-10-01.) This used to re-fetch Place Details for EVERY
+  //     active lead on EVERY 15-minute tick (~7,000 billed calls/day at 73
+  //     leads) and was the main driver of a $34 Google bill. Lead data is now
+  //     a discovery-day snapshot. If freshness matters again, call
+  //     refreshLeadData() only for the few leads about to be emailed — never
+  //     for the whole table. See lib/leads/refreshLeadData.ts.
 
   // 0b. Flag leads with no email and no phone for manual review — backstop
   //     for leads that skipped contactDiscoveryService entirely (e.g. CSV imports).

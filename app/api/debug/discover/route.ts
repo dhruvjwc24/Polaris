@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/supabase";
+import { placesFetch, PlacesBudgetExceeded } from "@/lib/leads/placesBudget";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 
@@ -19,7 +20,15 @@ export async function GET(req: Request) {
   const query = encodeURIComponent(`${niche} in ${city}, ${state}`);
   const url = `${PLACES_API_BASE}/textsearch/json?query=${query}&key=${key}`;
 
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await placesFetch("text", url);
+  } catch (err) {
+    if (err instanceof PlacesBudgetExceeded) {
+      return NextResponse.json({ error: err.message }, { status: 429 });
+    }
+    throw err;
+  }
   const data = await res.json();
 
   const placeIds: string[] = (data.results ?? []).map((r: { place_id: string }) => r.place_id);

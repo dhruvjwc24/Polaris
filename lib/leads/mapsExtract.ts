@@ -5,6 +5,8 @@
  * the automated discovery flow does.
  */
 
+import { placesFetch } from "./placesBudget";
+
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
 
 interface PlacePhoto {
@@ -122,7 +124,7 @@ async function findPlaceId(name: string, lat: string | null, lng: string | null,
   const params = new URLSearchParams({ query: name, key });
   if (lat && lng) params.set("location", `${lat},${lng}`);
 
-  const res = await fetch(`${PLACES_API_BASE}/textsearch/json?${params}`);
+  const res = await placesFetch("text", `${PLACES_API_BASE}/textsearch/json?${params}`);
   const data = await res.json();
   return data.results?.[0]?.place_id ?? null;
 }
@@ -130,7 +132,8 @@ async function findPlaceId(name: string, lat: string | null, lng: string | null,
 async function getPlaceDetails(placeId: string, key: string): Promise<PlaceResult | null> {
   const fields =
     "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews,opening_hours";
-  const res = await fetch(
+  const res = await placesFetch(
+    "detailsFull",
     `${PLACES_API_BASE}/details/json?place_id=${placeId}&fields=${fields}&key=${key}`
   );
   const data = await res.json();

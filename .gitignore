@@ -5,3 +5,7 @@ playwright/sessions/
 playwright/screenshots/
 *.tsbuildinfo
 .gstack/
+
+# Places API spend counter (lib/leads/placesBudget.ts)
+.places-usage.json
+.places-seen.json

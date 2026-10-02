@@ -1,17 +1,18 @@
 import { db } from "@/lib/db/supabase";
 import { scoreLead, isLeadEligible } from "./scoring";
+import { placesFetch, PlacesBudgetExceeded } from "./placesBudget";
+import { hasWebsiteCached, markHasWebsite } from "./placesSeen";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
-// No standing cap, per Cyril 2026-09-22 — discovery should find every
-// eligible lead a search turns up; it's the outreach send rate (see
-// lib/outreach/rateLimiter.ts) that gates how many actually get emailed per
-// day, not how many get discovered/enriched/mocked-up. Still overridable
-// for a controlled test run — see CLAUDE.md "Simulation / Test Mode".
-// An empty string (this repo's convention for "unset, see .env.local.example")
-// must also mean unlimited, not Number("") === 0, which would silently
-// discover zero leads on every run.
+// Default cap of 15 leads per discovery run (was unlimited 2026-09-22 until
+// 2026-10-01). Unlimited discovery on 2026-09-30 produced most of a $34 Google
+// bill — Places calls are billed per request, so "find everything" is not
+// free. Overridable via DISCOVERY_MAX_LEADS; spend is also hard-capped by
+// lib/leads/placesBudget.ts regardless of this number. An empty string (this
+// repo's convention for "unset, see .env.local.example") falls back to the
+// default, not Number("") === 0.
 const rawMaxLeads = process.env.DISCOVERY_MAX_LEADS;
-const MAX_LEADS = rawMaxLeads ? Number(rawMaxLeads) : Infinity;
+const MAX_LEADS = rawMaxLeads ? Number(rawMaxLeads) : 15;
 // Anything scoring below this on the combined signals — reviews, rating,
 // tenure, search prominence — isn't a strong enough prospect to spend a
 // mockup + outreach cycle on. 6 is the practical floor given the current
@@ -77,16 +78,26 @@ function normalizeQueryNiche(niche: string): string {
 async function fetchPage(
   url: string
 ): Promise<{ results: PlaceResult[]; next_page_token?: string }> {
-  const res = await fetch(url);
+  const res = await placesFetch("text", url);
   const data = await res.json();
   if (data.status !== "OK") return { results: [] };
   return { results: data.results ?? [], next_page_token: data.next_page_token };
 }
 
-export async function getPlaceDetails(placeId: string): Promise<PlaceResult | null> {
+// "light" asks only for website + phone (Google's cheaper Contact data); it is
+// enough to decide whether a candidate has no website. "full" adds
+// rating/reviews/hours/photos (the pricey Atmosphere data) and is only called
+// for the few candidates that already passed every other filter.
+export async function getPlaceDetails(
+  placeId: string,
+  mode: "light" | "full" = "full"
+): Promise<PlaceResult | null> {
   const fields =
-    "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews,opening_hours";
-  const res = await fetch(
+    mode === "light"
+      ? "place_id,name,formatted_address,formatted_phone_number,website"
+      : "place_id,name,formatted_address,formatted_phone_number,website,user_ratings_total,rating,photos,reviews,opening_hours";
+  const res = await placesFetch(
+    mode === "light" ? "detailsLight" : "detailsFull",
     `${PLACES_API_BASE}/details/json?place_id=${placeId}&fields=${fields}&key=${process.env.GOOGLE_PLACES_API_KEY}`
   );
   const data = await res.json();
@@ -152,6 +163,7 @@ export async function discoverLeads(
   const key = process.env.GOOGLE_PLACES_API_KEY;
   let inserted = 0;
 
+  try {
   for (const city of cities) {
     if (inserted >= MAX_LEADS) break;
 
@@ -161,39 +173,57 @@ export async function discoverLeads(
     for (let i = 0; i < allResults.length && inserted < MAX_LEADS; i++) {
       const candidate = allResults[i];
 
-      const detail = await getPlaceDetails(candidate.place_id);
-      if (!detail) continue;
-
-      // Trust Places API website field; only clear it if the domain is completely dead
-      let websiteUrl: string | null = detail.website ?? null;
-      if (websiteUrl && (await isDomainDead(websiteUrl))) websiteUrl = null;
-
-      // No-website businesses only (2026-09-21 pivot) — skip before doing any
-      // more work on this candidate.
-      if (websiteUrl) continue;
+      // Every filter that can run on data we already have runs BEFORE any
+      // billed Place Details call. Text Search results already carry rating
+      // and review count, so ineligible/low-score candidates (most of them)
+      // cost nothing further. Previously every candidate got a full Details
+      // call first.
+      const preReviews = candidate.user_ratings_total ?? null;
+      const preRating = candidate.rating ?? null;
+      if (!isLeadEligible({ review_count: preReviews, rating: preRating, years_established: null })) continue;
+      const preScore = scoreLead({
+        review_count: preReviews,
+        rating: preRating,
+        years_established: null,
+        position: i,
+      });
+      if (preScore < MIN_PRIORITY_SCORE) continue;
 
       // Deduplicate within this campaign only — same business can appear in separate campaigns
       const { data: existing } = await db
         .from("leads")
         .select("id")
-        .eq("google_maps_id", detail.place_id)
+        .eq("google_maps_id", candidate.place_id)
         .eq("campaign_id", campaignId)
         .maybeSingle();
       if (existing) continue;
 
+      // Already paid to learn this business has a website (any earlier run,
+      // any niche) — don't pay again. See lib/leads/placesSeen.ts.
+      if (hasWebsiteCached(candidate.place_id)) continue;
+
+      // Cheap call first: website + phone only.
+      const light = await getPlaceDetails(candidate.place_id, "light");
+      if (!light) continue;
+
+      // Trust Places API website field; only clear it if the domain is completely dead
+      let websiteUrl: string | null = light.website ?? null;
+      if (websiteUrl && (await isDomainDead(websiteUrl))) websiteUrl = null;
+
+      // No-website businesses only (2026-09-21 pivot) — skip before doing any
+      // more work on this candidate.
+      if (websiteUrl) {
+        markHasWebsite(candidate.place_id);
+        continue;
+      }
+
+      // Only now pay for the full record (reviews, hours, photos).
+      const detail = await getPlaceDetails(candidate.place_id, "full");
+      if (!detail) continue;
+
       const reviewCount = detail.user_ratings_total ?? null;
       const rating = detail.rating ?? null;
-
-      if (!isLeadEligible({ review_count: reviewCount, rating, years_established: null })) continue;
-
-      const score = scoreLead({
-        review_count: reviewCount,
-        rating,
-        years_established: null,
-        position: i,
-      });
-
-      if (score < MIN_PRIORITY_SCORE) continue;
+      const score = preScore;
 
       const { error: insertError } = await db.from("leads").insert({
         campaign_id: campaignId,
@@ -229,6 +259,12 @@ export async function discoverLeads(
 
       inserted++;
     }
+  }
+  } catch (err) {
+    // Budget guard tripped (lib/leads/placesBudget.ts): stop discovery
+    // cleanly and keep whatever was already inserted.
+    if (!(err instanceof PlacesBudgetExceeded)) throw err;
+    console.warn(`[discovery] ${err.message} Stopping with ${inserted} lead(s) inserted.`);
   }
 
   return inserted;
