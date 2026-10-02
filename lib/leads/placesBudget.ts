@@ -30,9 +30,10 @@ function envNumber(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-// Hard stop at $8/month (leaves $2 of headroom under Cyril's $10 ceiling for
-// estimate error) and $1.50/day (so one runaway day cannot be the whole month).
-const monthlyLimit = () => envNumber("PLACES_MONTHLY_BUDGET_USD", 8);
+// Hard stop at $10/month (Cyril's ceiling, set 2026-10-02; the per-call costs
+// above are rounded up, so estimated spend runs at or above real spend) and
+// $1.50/day (so one runaway day cannot be the whole month).
+const monthlyLimit = () => envNumber("PLACES_MONTHLY_BUDGET_USD", 10);
 const dailyLimit = () => envNumber("PLACES_DAILY_BUDGET_USD", 1.5);
 
 const USAGE_FILE = path.join(process.cwd(), ".places-usage.json");

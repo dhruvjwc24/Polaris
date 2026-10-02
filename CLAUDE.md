@@ -651,3 +651,20 @@ day-to-day operation would need a fresh conversation with Cyril, not just uncomm
 - **Revenue per weekend:** $500-$10,000+ (depends on model)
 - **Repeatability:** Same workflow scales across niches and cities
 
+
+## Google Places Spend Guard — Added 2026-10-01/02, Do Not Bypass
+
+A $34.10 Google Cloud bill for September (almost all Places API, mostly on 2026-09-30) led to a hard
+**$10/month** ceiling set by Cyril. Defense lines:
+- **`lib/leads/placesBudget.ts`**: every Places request MUST go through `placesFetch(kind, url)`.
+  Hard stop at $10/month and $1.50/day (estimates, rounded up; counter in `.places-usage.json`).
+  Env: `PLACES_MONTHLY_BUDGET_USD`, `PLACES_DAILY_BUDGET_USD`, `PLACES_DISABLED=true` kill switch.
+- **Google Cloud quota** (set by Cyril): legacy "Places API" 80 requests/day, 60/minute; "Places API (New)" disabled.
+- **$10 budget alert** (alerts only; Google's spend-cap preview doesn't cover Places).
+- `refreshLeadData` is no longer run by the scheduler (it re-fetched Details for every lead every 15 min).
+  Never re-add a whole-table Places refresh.
+- Discovery: filter on Text Search rating/reviews first, cheap website-only Details, full Details only for
+  survivors; `placesSeen.ts` remembers has-website businesses; `DISCOVERY_MAX_LEADS` defaults to 15; page 2 of
+  Text Search is OFF (`DISCOVERY_PAGES=2` to enable) pending the per-run funnel log (`[discovery] ... funnel`).
+- Only ~24% of Places-found leads ended up with an email (Brave/Tavily search), so email-find rate, not Places
+  cost per call, is the main efficiency lever. Early data: handyman/painting/garage door niches 0 emails.

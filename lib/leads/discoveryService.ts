@@ -130,7 +130,13 @@ async function fetchAllResults(
   );
   let allResults = [...page1.results];
 
-  if (page1.next_page_token) {
+  // Page 2 is OFF by default (DISCOVERY_PAGES=2 turns it on). Each page is one
+  // $0.032 Text Search call, and of 72 existing leads with a recorded search
+  // position none came from position 20+ (page 2) — 27% of page-1 top-10
+  // leads ended up emailable vs 13% for positions 10-19. Experiment started
+  // 2026-10-02; compare the per-run funnel log before turning it back on.
+  const wantPage2 = Number(process.env.DISCOVERY_PAGES ?? 1) >= 2;
+  if (wantPage2 && page1.next_page_token) {
     await new Promise((r) => setTimeout(r, 2000)); // required delay before next_page_token is valid
     const page2 = await fetchPage(
       `${PLACES_API_BASE}/textsearch/json?pagetoken=${page1.next_page_token}&key=${key}`
@@ -162,6 +168,8 @@ export async function discoverLeads(
 ): Promise<number> {
   const key = process.env.GOOGLE_PLACES_API_KEY;
   let inserted = 0;
+  // Per-run funnel, logged at the end, so search tuning is measured not guessed.
+  const funnel = { candidates: 0, passedPrefilter: 0, cachedHasWebsite: 0, lightChecked: 0, noWebsite: 0 };
 
   try {
   for (const city of cities) {
@@ -172,6 +180,7 @@ export async function discoverLeads(
 
     for (let i = 0; i < allResults.length && inserted < MAX_LEADS; i++) {
       const candidate = allResults[i];
+      funnel.candidates++;
 
       // Every filter that can run on data we already have runs BEFORE any
       // billed Place Details call. Text Search results already carry rating
@@ -188,6 +197,7 @@ export async function discoverLeads(
         position: i,
       });
       if (preScore < MIN_PRIORITY_SCORE) continue;
+      funnel.passedPrefilter++;
 
       // Deduplicate within this campaign only — same business can appear in separate campaigns
       const { data: existing } = await db
@@ -200,10 +210,14 @@ export async function discoverLeads(
 
       // Already paid to learn this business has a website (any earlier run,
       // any niche) — don't pay again. See lib/leads/placesSeen.ts.
-      if (hasWebsiteCached(candidate.place_id)) continue;
+      if (hasWebsiteCached(candidate.place_id)) {
+        funnel.cachedHasWebsite++;
+        continue;
+      }
 
       // Cheap call first: website + phone only.
       const light = await getPlaceDetails(candidate.place_id, "light");
+      funnel.lightChecked++;
       if (!light) continue;
 
       // Trust Places API website field; only clear it if the domain is completely dead
@@ -217,6 +231,7 @@ export async function discoverLeads(
         continue;
       }
 
+      funnel.noWebsite++;
       // Only now pay for the full record (reviews, hours, photos).
       const detail = await getPlaceDetails(candidate.place_id, "full");
       if (!detail) continue;
@@ -267,5 +282,6 @@ export async function discoverLeads(
     console.warn(`[discovery] ${err.message} Stopping with ${inserted} lead(s) inserted.`);
   }
 
+  console.log(`[discovery] ${niche}/${state} funnel: ${JSON.stringify({ ...funnel, inserted })}`);
   return inserted;
 }
