@@ -675,3 +675,8 @@ queries (Tavily/Brave) are capped by `lib/leads/searchBudget.ts` (`WEB_SEARCH_MO
 Tavily's free 1,000). The reply/meeting loop runs once at server start then every `REPLY_CHECK_MINUTES` (default
 1440); it costs ~$0 either way. Biggest non-Google cost is follow-up emails on Claude Sonnet (~$3/month at 10
 sends/day).
+
+**Email sequence, confirmed by Cyril 2026-10-02:** only (1) the cold email, (2) if they reply, the video + Zoom
+email (`replyFlow.ts`), and (3) the 1-hour meeting reminder (`meetingFlow.ts`). The automatic no-reply follow-ups at
+day 4 / day 7 (`followUpService.ts`) are DISABLED unless `ENABLE_NOREPLY_FOLLOWUPS=true`. The Calendly path in
+`schedulingService.ts` has no callers.

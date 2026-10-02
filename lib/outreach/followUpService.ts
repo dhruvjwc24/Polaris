@@ -32,6 +32,13 @@ async function generateFollowUp(lead: Lead, angle: "gap" | "competitor"): Promis
 }
 
 export async function processFollowUps(): Promise<void> {
+  // OFF by default (Cyril, 2026-10-02). His intended sequence is: cold email,
+  // then (only if they reply) the video + Zoom email, then the 1-hour reminder.
+  // The automatic no-reply nudges at day 4 and day 7 below are leftovers of
+  // the original playbook and were still firing on every pipeline tick. Set
+  // ENABLE_NOREPLY_FOLLOWUPS=true to bring them back.
+  if (process.env.ENABLE_NOREPLY_FOLLOWUPS !== "true") return;
+
   const now = new Date();
   const gmail = getGmailClient();
   let rateCapped = false;
