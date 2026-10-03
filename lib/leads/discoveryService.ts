@@ -1,8 +1,8 @@
 import { db } from "@/lib/db/supabase";
-import { scoreLead, isLeadEligible } from "./scoring";
+import { scoreLead, isLeadEligible, MAX_REVIEWS_DISCOVERY } from "./scoring";
 import { placesFetch, PlacesBudgetExceeded } from "./placesBudget";
 import { hasWebsiteCached, markHasWebsite, noEmailCached, markNoEmail } from "./placesSeen";
-import { findEmailForBusiness } from "./contactDiscoveryService";
+import { findEmailForBusiness, isSocialOnlyUrl } from "./contactDiscoveryService";
 import { isSendableLead } from "@/lib/pipeline/qualification";
 
 const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
@@ -178,6 +178,8 @@ export async function discoverLeads(
     cachedNoEmail: 0,
     lightChecked: 0,
     noWebsite: 0,
+    socialOnly: 0,
+    emailFromSocial: 0,
     emailSearched: 0,
     emailFound: 0,
   };
@@ -201,6 +203,7 @@ export async function discoverLeads(
       const preReviews = candidate.user_ratings_total ?? null;
       const preRating = candidate.rating ?? null;
       if (!isLeadEligible({ review_count: preReviews, rating: preRating, years_established: null })) continue;
+      if (preReviews !== null && preReviews > MAX_REVIEWS_DISCOVERY) continue;
       const preScore = scoreLead({
         review_count: preReviews,
         rating: preRating,
@@ -241,6 +244,14 @@ export async function discoverLeads(
 
       // No-website businesses only (2026-09-21 pivot) — skip before doing any
       // more work on this candidate.
+      // A Facebook/Instagram/Yelp page in the "website" field is not a
+      // website: keep the lead and use that page to find the email.
+      let socialUrl: string | null = null;
+      if (websiteUrl && isSocialOnlyUrl(websiteUrl)) {
+        socialUrl = websiteUrl;
+        websiteUrl = null;
+        funnel.socialOnly++;
+      }
       if (websiteUrl) {
         markHasWebsite(candidate.place_id);
         continue;
@@ -253,7 +264,8 @@ export async function discoverLeads(
       // anyway, so find the email BEFORE paying for the full record and
       // before inserting. Free web-search quota (capped in searchBudget.ts).
       const bizName = light.name ?? candidate.name;
-      const foundEmail = await findEmailForBusiness(bizName, city);
+      const { email: foundEmail, via } = await findEmailForBusiness(bizName, city, socialUrl);
+      if (via === "social") funnel.emailFromSocial++;
       funnel.emailSearched++;
       if (!foundEmail || !isSendableLead({ business_name: bizName, email: foundEmail })) {
         markNoEmail(candidate.place_id);

@@ -96,7 +96,7 @@ export async function deleteIneligibleLeads(): Promise<number> {
     .delete()
     .not("status", "eq", "archived")
     .neq("source", "manual")
-    .or("review_count.is.null,review_count.lte.15,rating.is.null,rating.eq.0")
+    .or("review_count.is.null,review_count.lt.5,rating.is.null,rating.eq.0")
     .select("id, business_name, review_count, rating");
 
   if (error) throw new Error(`deleteIneligibleLeads failed: ${error.message}`);

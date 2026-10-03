@@ -10,3 +10,4 @@ playwright/screenshots/
 .places-usage.json
 .places-seen.json
 .search-usage.json
+.niche-stats.json

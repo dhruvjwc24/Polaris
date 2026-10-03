@@ -210,10 +210,58 @@ async function findEmailViaSearch(
   return null;
 }
 
+// Hosts whose "website" on a Google listing is really just a social/directory
+// page: the business has no site of its own, and the page itself is the first
+// place to look for an email (Cyril, 2026-10-03). Google Maps listing pages
+// themselves expose no email or social links (tested), so this is the
+// free source.
+const SOCIAL_ONLY_HOSTS = [
+  "facebook.com", "fb.com", "fb.me", "instagram.com", "linktr.ee", "linktree.com",
+  "tiktok.com", "yelp.com", "nextdoor.com", "thumbtack.com", "angi.com",
+  "homeadvisor.com", "x.com", "twitter.com", "youtube.com", "yellowpages.com",
+  "bbb.org", "mapquest.com",
+];
+
+export function isSocialOnlyUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return SOCIAL_ONLY_HOSTS.some((h) => host === h || host.endsWith("." + h));
+  } catch {
+    return false;
+  }
+}
+
+async function findEmailOnSocialPage(socialUrl: string, businessName: string): Promise<string | null> {
+  const urls = [socialUrl];
+  if (/facebook\.com/i.test(socialUrl) && !/\/about\/?$/.test(socialUrl)) {
+    urls.push(socialUrl.replace(/\/+$/, "") + "/about");
+  }
+  for (const u of urls) {
+    const { emails } = await scrapeWebsite(u);
+    const match = emails.find(
+      (e) => !/(facebook|instagram|fbcdn|yelp|google)\./i.test(e.split("@")[1] ?? "") && isLikelyRelatedEmail(e, businessName)
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
 // Used by discovery to check a business can be emailed BEFORE paying for its
 // full Google record or inserting it as a lead (see discoveryService.ts).
-export async function findEmailForBusiness(businessName: string, city: string): Promise<string | null> {
-  return findEmailViaSearch(businessName, city);
+// Order (cheapest first): the business's own social page from its Google
+// listing (free HTTP fetch), then a web search (counted against the monthly
+// Tavily cap).
+export async function findEmailForBusiness(
+  businessName: string,
+  city: string,
+  socialUrl?: string | null
+): Promise<{ email: string | null; via: "social" | "search" | null }> {
+  if (socialUrl) {
+    const fromSocial = await findEmailOnSocialPage(socialUrl, businessName);
+    if (fromSocial) return { email: fromSocial, via: "social" };
+  }
+  const fromSearch = await findEmailViaSearch(businessName, city);
+  return { email: fromSearch, via: fromSearch ? "search" : null };
 }
 
 async function findSocialViaSearch(

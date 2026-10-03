@@ -22,16 +22,19 @@ interface ScoringInput {
 // so it's excluded before scoring even runs (not just scored low). Checked
 // both at discovery time (never inserted) and by the recurring filtering net
 // (deleted if one slips through, e.g. a review count that drops over time).
+// Discovery-only ceiling: 0 of 11 businesses above 150 reviews had no website.
+export const MIN_REVIEWS = 5;
+export const MAX_REVIEWS_DISCOVERY = 150;
+
 export function isLeadEligible(
   input: Pick<ScoringInput, "review_count" | "rating" | "years_established">
 ): boolean {
-  // 15 or fewer reviews reads as not enough credibility/traction to be worth
-  // pursuing — not established enough to plausibly afford or want a website.
-  // Was 20 (2026-09-21), lowered to 15 (2026-09-22): most real leads were
-  // getting killed by this cutoff specifically (not rating), and companies
-  // under ~50 reviews turned out to correlate strongly with no website at
-  // all — a 20-review floor was excluding good candidates.
-  if (input.review_count === null || input.review_count <= 15) return false;
+  // 2026-10-03 measurement (72 candidates, small-operator niches in NoVA):
+  // no-website rate was 45% at 0-15 reviews, 20% at 16-50, 12% at 51-150,
+  // 0% above 150. Well-reviewed businesses are established and already have
+  // sites, so the old >15 floor was throwing away the best bucket. Floor is
+  // now 3 (1-2 review listings had no findable email and look dormant).
+  if (input.review_count === null || input.review_count < MIN_REVIEWS) return false;
   // No rating (or a 0) means no real signal to go on at all.
   if (input.rating === null || input.rating === 0) return false;
   // Under 6 months old — too new to have proven it'll stick around.
@@ -42,13 +45,14 @@ export function isLeadEligible(
 export function scoreLead(input: ScoringInput): number {
   let score = 5;
 
-  // Review count — only reachable here at all if isLeadEligible already
-  // passed (i.e. > 15). Two tiers, confirmed 2026-09-22: >15 is +1, >50 is
-  // +2 (the eligibility floor stays 15 — this is a bonus tier on top, not a
-  // second exclusion cutoff).
+  // Review count. 16-50 is the sweet spot (2026-10-03, Cyril): established
+  // enough to afford a ~$500 site and plausibly reply, still often without
+  // one (20% no-website). 5-15 is a real but secondary focus: the highest
+  // no-website rate (~45%) but the smallest budgets, so it must NOT outscore
+  // 16-50. 51+ has the lowest no-website rate (9-12%) and gets no bonus.
   if (input.review_count !== null) {
-    if (input.review_count > 50) score += 2;
-    else if (input.review_count > 15) score += 1;
+    if (input.review_count >= 16 && input.review_count <= 50) score += 2;
+    else if (input.review_count >= 5 && input.review_count <= 15) score += 1;
   }
 
   // Rating — same, only reachable if non-null/non-zero already.

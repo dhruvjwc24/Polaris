@@ -2,13 +2,14 @@ import { describe, it, expect } from "vitest";
 import { isLeadEligible, scoreLead } from "./scoring";
 
 describe("isLeadEligible", () => {
-  it("excludes 15 or fewer reviews", () => {
-    expect(isLeadEligible({ review_count: 15, rating: 4.5, years_established: null })).toBe(false);
+  it("excludes fewer than 5 reviews", () => {
+    expect(isLeadEligible({ review_count: 4, rating: 4.5, years_established: null })).toBe(false);
     expect(isLeadEligible({ review_count: 0, rating: 4.5, years_established: null })).toBe(false);
   });
 
-  it("accepts more than 15 reviews", () => {
-    expect(isLeadEligible({ review_count: 16, rating: 4.5, years_established: null })).toBe(true);
+  it("accepts 5 or more reviews, including the old 15-or-fewer band", () => {
+    expect(isLeadEligible({ review_count: 5, rating: 4.5, years_established: null })).toBe(true);
+    expect(isLeadEligible({ review_count: 15, rating: 4.5, years_established: null })).toBe(true);
   });
 
   it("excludes null or zero rating", () => {
@@ -31,21 +32,23 @@ describe("isLeadEligible", () => {
 
 describe("scoreLead", () => {
   it("never scores below 5 given eligible input", () => {
-    // Worst-case eligible combo: 16 reviews (+1), 1-star rating (-1), 6mo tenure (+0)
+    // Worst-case eligible combo with 5-150 reviews: 16 reviews (+2), 1-star rating (-1), 6mo tenure (+0)
     const score = scoreLead({ review_count: 16, rating: 1, years_established: 0.5 });
-    expect(score).toBe(5);
+    expect(score).toBe(6);
   });
 
   it("can reach 10 with strong signals across the board", () => {
-    const score = scoreLead({ review_count: 60, rating: 4.8, years_established: 3, position: 2 });
-    expect(score).toBe(10);
+    const score = scoreLead({ review_count: 30, rating: 4.8, years_established: 3, position: 2 });
+    expect(score).toBe(10); // raw 11, clamped to 10
   });
 
-  it("scores reviews correctly: 16-50 is +1, 51+ is +2", () => {
+  it("scores reviews correctly: 16-50 is +2, 5-15 is +1, 51+ is +0", () => {
     const base = { rating: null, years_established: null };
-    expect(scoreLead({ ...base, review_count: 16 })).toBe(6);
-    expect(scoreLead({ ...base, review_count: 50 })).toBe(6);
-    expect(scoreLead({ ...base, review_count: 51 })).toBe(7);
+    expect(scoreLead({ ...base, review_count: 5 })).toBe(6);
+    expect(scoreLead({ ...base, review_count: 15 })).toBe(6);
+    expect(scoreLead({ ...base, review_count: 16 })).toBe(7);
+    expect(scoreLead({ ...base, review_count: 50 })).toBe(7);
+    expect(scoreLead({ ...base, review_count: 51 })).toBe(5);
   });
 
   it("scores rating correctly: under 3 is -1, 3.x is +0, 4+ is +1", () => {
